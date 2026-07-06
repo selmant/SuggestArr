@@ -58,13 +58,13 @@ async def test_fetch_trakt_recommendations_requests_max_per_type_for_both():
     assert automation.trakt_client.get_recommendations.await_count == 2
     automation.trakt_client.get_recommendations.assert_any_await(
         "movie",
-        limit=100,
+        limit=250,
         ignore_collected=True,
         ignore_watched=True,
     )
     automation.trakt_client.get_recommendations.assert_any_await(
         "tv",
-        limit=100,
+        limit=250,
         ignore_collected=True,
         ignore_watched=True,
     )

@@ -13,9 +13,7 @@ from api_service.jobs._trakt_automation_base import TraktJobAutomationBase
 from api_service.services.config_service import ConfigService
 from api_service.services.request_sources import TRAKT_RECOMMENDATIONS_SOURCE
 from api_service.services.trakt.media_user_augmentor import TraktAccountResolver
-from api_service.services.trakt.trakt_client import TraktClient
-
-TRAKT_RECOMMENDATIONS_MAX = 100
+from api_service.services.trakt.trakt_client import TraktClient, TRAKT_RECOMMENDATIONS_LIMIT_MAX
 
 
 class TraktRecommendationsAutomation(TraktJobAutomationBase):
@@ -182,10 +180,10 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
 
         media_types = ["movie", "tv"] if media_type == "both" else [media_type]
         if len(media_types) == 1:
-            per_type_limit = min(TRAKT_RECOMMENDATIONS_MAX, fetch_limit)
+            per_type_limit = min(TRAKT_RECOMMENDATIONS_LIMIT_MAX, fetch_limit)
         else:
-            # Recommendations do not paginate; fetch Trakt's max per type.
-            per_type_limit = TRAKT_RECOMMENDATIONS_MAX
+            # Recommendations do not paginate; request Trakt's max per type.
+            per_type_limit = TRAKT_RECOMMENDATIONS_LIMIT_MAX
 
         raw_items: List[Dict[str, Any]] = []
         trakt_counts: Dict[str, int] = {}

@@ -10,6 +10,8 @@ import aiohttp
 from api_service.db.database_manager import DatabaseManager
 from api_service.services.http.base_client import BaseHTTPClient
 
+TRAKT_RECOMMENDATIONS_LIMIT_MAX = 250
+
 
 class TraktDeviceFlowError(RuntimeError):
     """Base error for the Trakt device-code OAuth flow."""
@@ -484,7 +486,7 @@ class TraktClient(BaseHTTPClient):
 
         path = "/recommendations/movies" if media_type == "movie" else "/recommendations/shows"
         params: dict[str, Any] = {
-            "limit": max(1, min(int(limit), 100)),
+            "limit": max(1, min(int(limit), TRAKT_RECOMMENDATIONS_LIMIT_MAX)),
             "extended": "min",
         }
         if ignore_collected:

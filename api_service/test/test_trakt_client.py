@@ -8,6 +8,7 @@ from api_service.services.trakt.trakt_client import (
     TraktDeviceDenied,
     TraktDeviceExpired,
     TraktDevicePending,
+    TRAKT_RECOMMENDATIONS_LIMIT_MAX,
 )
 
 
@@ -278,6 +279,16 @@ def test_normalize_recommendation_items_deduplicates_by_tmdb_id():
         "title": "Inception",
         "year": 2010,
     }]
+
+
+@pytest.mark.asyncio
+async def test_get_recommendations_caps_limit_at_api_max():
+    session = FakeSession([FakeResponse(200, [])])
+    client = TraktClient("cid", "secret", "access", session=session)
+
+    await client.get_recommendations("movie", limit=500)
+
+    assert session.calls[0][2]["params"]["limit"] == TRAKT_RECOMMENDATIONS_LIMIT_MAX
 
 
 @pytest.mark.asyncio
