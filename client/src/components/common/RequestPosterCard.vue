@@ -14,7 +14,7 @@
       <div class="poster-overlay poster-overlay--top">
         <span class="poster-pill poster-pill--media">
           <i :class="item.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
-          {{ compact ? item.media_type.charAt(0).toUpperCase() : item.media_type.toUpperCase() }}
+          {{ mediaTypeLabel }}
         </span>
         <span v-if="showRating" class="poster-pill poster-pill--rating">
           <i class="fas fa-star"></i>
@@ -234,6 +234,17 @@ export default {
     },
     requestMethodIcon() {
       return this.requestMethodMetadata?.icon || '';
+    },
+    mediaTypeLabel() {
+      if (this.item.media_type === 'tv') {
+        return 'TV';
+      }
+
+      if (this.item.media_type === 'movie') {
+        return this.compact ? 'Film' : 'MOVIE';
+      }
+
+      return String(this.item.media_type || '').toUpperCase();
     },
   },
   methods: {

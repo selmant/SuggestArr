@@ -85,21 +85,21 @@
                 </div>
               </div>
 
-              <div v-if="traktModalTarget" class="trakt-action-strip" data-testid="trakt-action-strip">
+              <div v-if="traktModalTarget" class="trakt-action-strip trakt-action-strip--modal" data-testid="trakt-action-strip">
                 <div class="trakt-action-main">
-                  <span class="trakt-action-label">
-                    <i class="icon-trakt"></i>
-                    Trakt
-                  </span>
-                  <span v-if="traktStatusLoading" class="trakt-action-state">Checking...</span>
-                  <span v-else-if="traktStatusError" class="trakt-action-state trakt-action-state--warn">
-                    {{ traktStatusError }}
-                  </span>
-                  <span v-else class="trakt-action-state">
-                    {{ traktStatus?.watched ? 'Watched' : 'Unwatched' }}
-                    <template v-if="traktStatus?.rating_stars">- {{ traktStatus.rating_stars }}★</template>
-                    <template v-else-if="traktStatus?.rating">- {{ traktStatus.rating / 2 }}★</template>
-                  </span>
+                  <div class="trakt-action-summary">
+                    <span class="trakt-action-label">
+                      <i class="icon-trakt"></i>
+                      Trakt
+                    </span>
+                    <span v-if="traktStatusLoading" class="trakt-action-state">Checking...</span>
+                    <span v-else-if="traktStatusError" class="trakt-action-state trakt-action-state--warn">
+                      {{ traktStatusError }}
+                    </span>
+                    <span v-else class="trakt-action-state">
+                      {{ traktStatusLabel }}
+                    </span>
+                  </div>
                 </div>
 
                 <div class="trakt-action-controls">
@@ -135,6 +135,18 @@
                 <div v-if="selectedSource.release_date && selectedSource.requested_at" class="request-details-modal__context-row">
                   <i class="fas fa-calendar"></i>
                   <span>Released <strong>{{ selectedSource.release_date }}</strong></span>
+                </div>
+                <div v-if="mediaTypeLabel" class="request-details-modal__context-row">
+                  <i :class="selectedSource.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
+                  <span>Media type <strong>{{ mediaTypeLabel }}</strong></span>
+                </div>
+                <div v-if="selectedSource.rating" class="request-details-modal__context-row">
+                  <i class="fas fa-star"></i>
+                  <span>Audience rating <strong>{{ selectedSource.rating }}</strong></span>
+                </div>
+                <div v-if="traktModalTarget" class="request-details-modal__context-row request-details-modal__context-row--trakt">
+                  <i class="icon-trakt"></i>
+                  <span>Trakt status <strong>{{ traktStatusLabel }}</strong></span>
                 </div>
                 <div v-if="selectedSource.source_origin === 'trakt_history'" class="request-details-modal__context-row">
                   <i class="fas fa-history"></i>
@@ -392,6 +404,9 @@ export default {
       return Boolean(
         this.requestMethodLabel ||
         (this.selectedSource?.release_date && this.selectedSource?.requested_at) ||
+        this.mediaTypeLabel ||
+        this.selectedSource?.rating ||
+        this.traktModalTarget ||
         this.selectedSource?.source_origin === 'trakt_history' ||
         this.sourceContentMetadata ||
         this.selectedSource?.user_name
@@ -408,6 +423,31 @@ export default {
     },
     requestMethodIcon() {
       return this.requestMethodMetadata?.icon || '';
+    },
+    mediaTypeLabel() {
+      if (this.selectedSource?.media_type === 'tv') {
+        return 'TV Show';
+      }
+
+      if (this.selectedSource?.media_type === 'movie') {
+        return 'Movie';
+      }
+
+      return this.selectedSource?.media_type || '';
+    },
+    traktStatusLabel() {
+      if (this.traktStatusLoading) {
+        return 'Checking...';
+      }
+
+      if (this.traktStatusError) {
+        return this.traktStatusError;
+      }
+
+      const state = this.traktStatus?.watched ? 'Watched' : 'Unwatched';
+      const stars = this.traktStatus?.rating_stars || (this.traktStatus?.rating ? `${this.traktStatus.rating / 2}` : '');
+
+      return stars ? `${state} - ${stars} stars` : state;
     },
   },
   methods: {
