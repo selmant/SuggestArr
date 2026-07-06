@@ -2,10 +2,16 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-const source = readFileSync(new URL('./RequestsPage.vue', import.meta.url), 'utf8');
+const requestsPageSource = readFileSync(new URL('./RequestsPage.vue', import.meta.url), 'utf8');
+const detailsModalSource = readFileSync(new URL('./common/RequestDetailsModal.vue', import.meta.url), 'utf8');
 
-test('grouped request modal renders Trakt actions for each request row', () => {
-  assert.match(source, /v-if="canManageTrakt\(request\)" class="trakt-inline-actions"/);
-  assert.match(source, /@click\.stop="toggleTraktWatchedFor\(request\)"/);
-  assert.match(source, /@change\.stop="rateRequestOnTraktFromModal\(request, \$event\)"/);
+test('request details modal renders Trakt actions for selected and related requests', () => {
+  assert.match(requestsPageSource, /:can-manage-trakt="canManageTrakt"/);
+  assert.match(requestsPageSource, /@toggle-related-trakt-watched="toggleTraktWatchedFor"/);
+  assert.match(requestsPageSource, /@rate-related-on-trakt="rateRequestOnTraktFromModal"/);
+
+  assert.match(detailsModalSource, /v-if="canManageTrakt\(selectedSource\)" class="trakt-action-strip"/);
+  assert.match(detailsModalSource, /v-if="canManageTrakt\(request\)" class="trakt-inline-actions"/);
+  assert.match(detailsModalSource, /@click\.stop="\$emit\('toggle-related-trakt-watched', request\)"/);
+  assert.match(detailsModalSource, /@change\.stop="\$emit\('rate-related-on-trakt', request, \$event\)"/);
 });
