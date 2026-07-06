@@ -1434,6 +1434,31 @@ class DatabaseManager:
                 cursor.execute(insert_query, insert_params)
             conn.commit()
 
+    def update_metadata_tmdb_rating(
+        self, media_id: str, media_type: str, rating: float | None
+    ) -> None:
+        """Fill the TMDb rating for a metadata row only when it is currently NULL.
+
+        Uses ``WHERE ... AND rating IS NULL`` so an existing real value is never
+        overwritten. Series that entered metadata via non-discover flows often
+        lack a TMDb ``vote_average``; enrichment resolves and backfills it here.
+        """
+        if rating is None:
+            return
+        query = """
+            UPDATE metadata
+            SET rating = ?
+            WHERE media_id = ? AND media_type = ? AND rating IS NULL
+        """
+        params = (rating, media_id, media_type)
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if self.db_type in ['mysql', 'postgres']:
+                query = query.replace("?", "%s")
+            cursor.execute(query, params)
+            conn.commit()
+
     def update_metadata_rt_user_rating(
         self, media_id: str, media_type: str, rt_user_rating: int | None
     ) -> None:

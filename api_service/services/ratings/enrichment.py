@@ -113,6 +113,20 @@ def _apply_ratings_to_media(media: dict[str, Any], ratings: dict[str, Any]) -> N
     ):
         if key in ratings:
             media[key] = ratings[key]
+    # TMDb rating (vote_average) lives in the metadata.rating column; only fill
+    # it when the media item is missing one so we never clobber a real value.
+    if ratings.get('rating') is not None and media.get('rating') in (None, ''):
+        media['rating'] = ratings['rating']
+
+
+_OMDB_RATING_KEYS = ('imdb_rating', 'imdb_votes', 'rt_rating', 'rt_user_rating', 'metacritic_rating')
+
+
+def _set_tmdb_rating(media: dict[str, Any], ratings: dict[str, Any], value: Any) -> None:
+    """Fill the TMDb rating when the media item is missing one."""
+    if value is not None and media.get('rating') in (None, ''):
+        ratings['rating'] = value
+        media['rating'] = value
 
 
 async def _fetch_external_ratings(
@@ -120,6 +134,7 @@ async def _fetch_external_ratings(
     media_type: str,
     tmdb_client,
     trakt_client=None,
+    mdblist_client=None,
 ) -> dict[str, Any]:
     media_id = str(media.get('id') or media.get('media_id') or '')
     title = media.get('title') or media.get('name')
@@ -132,26 +147,54 @@ async def _fetch_external_ratings(
         'metacritic_rating': None,
         'trakt_rating': None,
         'trakt_votes': None,
+        'rating': None,
         'title': title,
     }
 
+    # 1. MDBList (preferred): a single TMDb-id lookup aggregates IMDb / RT
+    #    critic + audience / Metacritic / Trakt / TMDb for movies AND series.
+    #    Unlike OMDb, its RT/Metacritic coverage for TV is reliable.
+    if mdblist_client is not None and media_id:
+        try:
+            mdb = await mdblist_client.get_ratings(media_type, media_id)
+        except Exception as exc:
+            mdb = None
+            logger.debug("MDBList lookup failed for %s %s: %s", media_type, media_id, exc)
+        if mdb:
+            if not ratings['imdb_id'] and mdb.get('imdb_id'):
+                ratings['imdb_id'] = mdb['imdb_id']
+            for key in ('imdb_rating', 'imdb_votes', 'rt_rating', 'rt_user_rating',
+                        'metacritic_rating', 'trakt_rating', 'trakt_votes'):
+                if mdb.get(key) is not None:
+                    ratings[key] = mdb[key]
+            _set_tmdb_rating(media, ratings, mdb.get('rating'))
+
     imdb_id = ratings['imdb_id']
-    if not imdb_id and tmdb_client is not None and media_id:
-        details = await tmdb_client._get_item_details(int(media_id), media_type)
-        imdb_id = (details or {}).get('imdb_id')
-        ratings['imdb_id'] = imdb_id
 
+    # 2. Resolve a missing IMDb id and/or TMDb rating from TMDb details.
+    need_details = (
+        tmdb_client is not None
+        and media_id
+        and (not imdb_id or media.get('rating') in (None, ''))
+    )
+    if need_details:
+        details = await tmdb_client._get_item_details(int(media_id), media_type) or {}
+        if not imdb_id:
+            imdb_id = details.get('imdb_id')
+            ratings['imdb_id'] = imdb_id
+        _set_tmdb_rating(media, ratings, details.get('rating'))
+
+    # 3. OMDb fallback for any IMDb/RT/Metacritic field MDBList did not supply.
     omdb_client = getattr(tmdb_client, 'omdb_client', None) if tmdb_client is not None else None
-    if omdb_client and imdb_id:
-        omdb_data = await omdb_client.get_rating(imdb_id)
+    if omdb_client and imdb_id and any(ratings.get(k) is None for k in _OMDB_RATING_KEYS):
+        omdb_data = await omdb_client.get_rating(imdb_id, media_type)
         if omdb_data:
-            ratings['imdb_rating'] = omdb_data.get('imdb_rating')
-            ratings['imdb_votes'] = omdb_data.get('imdb_votes')
-            ratings['rt_rating'] = omdb_data.get('rt_rating')
-            ratings['rt_user_rating'] = omdb_data.get('rt_user_rating')
-            ratings['metacritic_rating'] = omdb_data.get('metacritic_rating')
+            for key in _OMDB_RATING_KEYS:
+                if ratings.get(key) is None and omdb_data.get(key) is not None:
+                    ratings[key] = omdb_data[key]
 
-    if trakt_client is not None and media_id:
+    # 4. Trakt fallback for the community rating.
+    if trakt_client is not None and media_id and ratings.get('trakt_rating') is None:
         try:
             community = await trakt_client.get_community_rating(media_type, media_id)
             if community:
@@ -177,6 +220,7 @@ async def enrich_media_ratings(
     db_manager=None,
     trakt_client=None,
     force_refresh: bool = False,
+    mdblist_client=None,
 ) -> dict[str, Any]:
     """Populate multi-source ratings on ``media`` using DB + in-run caches."""
     media_id = str(media.get('id') or media.get('media_id') or '')
@@ -213,7 +257,17 @@ async def enrich_media_ratings(
                 _apply_ratings_to_media(media, cached)
                 return media
 
-        ratings = await _fetch_external_ratings(media, media_type, tmdb_client, trakt_client)
+        ratings = await _fetch_external_ratings(
+            media, media_type, tmdb_client, trakt_client, mdblist_client
+        )
+        # Persist a resolved TMDb rating independently: save_metadata uses
+        # INSERT OR IGNORE (no-op for existing rows) and the backfill path never
+        # calls it, so fill the metadata.rating column here when it is empty.
+        if db_manager is not None and ratings.get('rating') is not None:
+            try:
+                db_manager.update_metadata_tmdb_rating(media_id, media_type, ratings['rating'])
+            except Exception as exc:
+                logger.debug("Failed to persist TMDb rating for %s %s: %s", media_type, media_id, exc)
         if _has_any_rating(ratings) and db_manager is not None:
             db_manager.update_metadata_ratings(media_id, media_type, ratings)
             cached = {k: v for k, v in ratings.items() if k != 'ratings_updated_at'}
@@ -228,34 +282,49 @@ async def enrich_media_ratings(
 
 
 def build_enrichment_clients():
-    """Create optional TMDb/Trakt clients for rating enrichment."""
+    """Create optional MDBList/TMDb/Trakt clients for rating enrichment.
+
+    Each provider is built independently: a configured provider is usable even
+    when the others are absent (e.g. Trakt community ratings or MDBList
+    aggregated ratings work without a TMDb key).
+
+    Returns:
+        tuple: ``(tmdb_client, trakt_client, mdblist_client)`` with any element
+        set to ``None`` when its API key is not configured.
+    """
+    from api_service.services.mdblist.mdblist_client import MdbListClient
     from api_service.services.omdb.omdb_client import OmdbClient
     from api_service.services.tmdb.tmdb_client import TMDbClient
     from api_service.services.trakt.trakt_client import TraktClient
 
     env = load_env_vars()
+
+    tmdb_client = None
     tmdb_key = (env.get('TMDB_API_KEY') or '').strip()
-    if not tmdb_key:
-        return None, None
+    if tmdb_key:
+        omdb_client = None
+        omdb_key = (env.get('OMDB_API_KEY') or '').strip()
+        if omdb_key:
+            omdb_client = OmdbClient(omdb_key)
 
-    omdb_client = None
-    omdb_key = (env.get('OMDB_API_KEY') or '').strip()
-    if omdb_key:
-        omdb_client = OmdbClient(omdb_key)
+        tmdb_client = TMDbClient(
+            api_key=tmdb_key,
+            search_size=1,
+            tmdb_threshold=None,
+            tmdb_min_votes=None,
+            include_no_ratings=True,
+            filter_release_year=None,
+            filter_language=None,
+            filter_genre=None,
+            filter_region_provider=None,
+            filter_streaming_services=None,
+            omdb_client=omdb_client,
+        )
 
-    tmdb_client = TMDbClient(
-        api_key=tmdb_key,
-        search_size=1,
-        tmdb_threshold=None,
-        tmdb_min_votes=None,
-        include_no_ratings=True,
-        filter_release_year=None,
-        filter_language=None,
-        filter_genre=None,
-        filter_region_provider=None,
-        filter_streaming_services=None,
-        omdb_client=omdb_client,
-    )
+    mdblist_client = None
+    mdblist_key = (env.get('MDBLIST_API_KEY') or '').strip()
+    if mdblist_key:
+        mdblist_client = MdbListClient(mdblist_key)
 
     trakt_client = None
     trakt_id = (env.get('TRAKT_CLIENT_ID') or '').strip()
@@ -269,7 +338,7 @@ def build_enrichment_clients():
             expires_at=env.get('TRAKT_EXPIRES_AT'),
         )
 
-    return tmdb_client, trakt_client
+    return tmdb_client, trakt_client, mdblist_client
 
 
 async def enrich_and_save_metadata(
@@ -278,10 +347,11 @@ async def enrich_and_save_metadata(
     db_manager,
     tmdb_client=None,
     trakt_client=None,
+    mdblist_client=None,
 ) -> dict[str, Any]:
     """Enrich ratings then persist metadata for a media dict."""
-    if tmdb_client is None and trakt_client is None:
-        tmdb_client, trakt_client = build_enrichment_clients()
+    if tmdb_client is None and trakt_client is None and mdblist_client is None:
+        tmdb_client, trakt_client, mdblist_client = build_enrichment_clients()
 
     await enrich_media_ratings(
         media,
@@ -289,6 +359,7 @@ async def enrich_and_save_metadata(
         tmdb_client=tmdb_client,
         db_manager=db_manager,
         trakt_client=trakt_client,
+        mdblist_client=mdblist_client,
     )
     db_manager.save_metadata(media, media_type)
     return media

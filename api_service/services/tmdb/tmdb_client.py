@@ -411,13 +411,18 @@ class TMDbClient(BaseHTTPClient):
                         return {
                             'runtime': data.get('runtime'),
                             'imdb_id': data.get('imdb_id'),
+                            'rating': data.get('vote_average'),
                         }
                     else:
                         run_times = data.get('episode_run_time', [])
                         runtime = run_times[0] if run_times else None
                         # TV details don't include imdb_id; fetch from external_ids
                         imdb_id = await self._get_tv_imdb_id(content_id)
-                        return {'runtime': runtime, 'imdb_id': imdb_id}
+                        return {
+                            'runtime': runtime,
+                            'imdb_id': imdb_id,
+                            'rating': data.get('vote_average'),
+                        }
                 else:
                     self.logger.warning("Failed to fetch details for %s ID %s: HTTP %d",
                                         content_type, content_id, response.status)

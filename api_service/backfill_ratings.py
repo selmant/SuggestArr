@@ -97,7 +97,7 @@ def fetch_candidates(
     ]
 
 
-async def _close_clients(tmdb_client, trakt_client, omdb_client=None) -> None:
+async def _close_clients(tmdb_client, trakt_client, omdb_client=None, mdblist_client=None) -> None:
     if omdb_client is not None:
         await omdb_client.close()
     if tmdb_client is not None:
@@ -106,6 +106,8 @@ async def _close_clients(tmdb_client, trakt_client, omdb_client=None) -> None:
         await tmdb_client.close()
     if trakt_client is not None:
         await trakt_client.close()
+    if mdblist_client is not None:
+        await mdblist_client.close()
 
 
 async def _resolve_imdb_id(item: dict, tmdb_client) -> str | None:
@@ -131,7 +133,7 @@ async def run_rt_user_backfill(
         print("OMDB_API_KEY is required for RT audience backfill.")
         return 0, 0, 1
 
-    tmdb_client, _ = build_enrichment_clients()
+    tmdb_client, _, _ = build_enrichment_clients()
     omdb_client = OmdbClient(omdb_key)
     enriched = 0
     skipped = 0
@@ -208,9 +210,9 @@ async def run_backfill(args: argparse.Namespace) -> int:
         print(f"Done. enriched={enriched} skipped={skipped} failed={failed}")
         return 0 if failed == 0 else 1
 
-    tmdb_client, trakt_client = build_enrichment_clients()
-    if tmdb_client is None:
-        print("TMDB_API_KEY is required for backfill.")
+    tmdb_client, trakt_client, mdblist_client = build_enrichment_clients()
+    if tmdb_client is None and mdblist_client is None:
+        print("TMDB_API_KEY or MDBLIST_API_KEY is required for backfill.")
         return 1
 
     clear_run_ratings_cache()
@@ -232,6 +234,7 @@ async def run_backfill(args: argparse.Namespace) -> int:
                     db_manager=db,
                     trakt_client=trakt_client,
                     force_refresh=args.force,
+                    mdblist_client=mdblist_client,
                 )
                 after = db.get_metadata_ratings(str(item["id"]), media_type) or {}
                 got_rating = any(
@@ -268,7 +271,7 @@ async def run_backfill(args: argparse.Namespace) -> int:
             if args.delay > 0 and index < len(candidates):
                 await asyncio.sleep(args.delay)
     finally:
-        await _close_clients(tmdb_client, trakt_client)
+        await _close_clients(tmdb_client, trakt_client, mdblist_client=mdblist_client)
 
     print()
     print(f"Done. enriched={enriched} skipped={skipped} failed={failed}")

@@ -217,6 +217,7 @@ def get_default_values():
         'SHOW_RATING_TRAKT_COMMUNITY': lambda: True,
         'RATINGS_CACHE_TTL_HOURS': lambda: 168,
         'OMDB_API_KEY': lambda: '',
+        'MDBLIST_API_KEY': lambda: '',
         'FILTER_RATING_SOURCE': lambda: 'tmdb',
         'FILTER_IMDB_THRESHOLD': lambda: None,
         'FILTER_IMDB_MIN_VOTES': lambda: None,
@@ -328,7 +329,7 @@ def get_config_sections():
     Returns a dictionary of configuration sections and their associated keys.
     """
     return {
-        'services': ['TMDB_API_KEY', 'OMDB_API_KEY', 'SELECTED_SERVICE', 'PLEX_TOKEN', 'PLEX_API_URL', 'PLEX_CLIENT_ID',
+        'services': ['TMDB_API_KEY', 'OMDB_API_KEY', 'MDBLIST_API_KEY', 'SELECTED_SERVICE', 'PLEX_TOKEN', 'PLEX_API_URL', 'PLEX_CLIENT_ID',
                     'PLEX_LIBRARIES', 'JELLYFIN_API_URL', 'JELLYFIN_TOKEN', 'JELLYFIN_LIBRARIES',
                     'SEER_API_URL', 'SEER_TOKEN', 'SEER_USER_NAME', 'SEER_USER_PSW',
                     'SEER_SESSION_TOKEN', 'SEER_ANIME_PROFILE_CONFIG', 'SEER_REQUEST_DELAY',

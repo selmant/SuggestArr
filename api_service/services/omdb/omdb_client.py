@@ -122,12 +122,33 @@ class OmdbClient(BaseHTTPClient):
             return None
         return _parse_int_rating(match.group(1))
 
-    async def get_rating(self, imdb_id):
+    def _tomato_url_matches(self, tomato_url: str, media_type: str | None) -> bool:
+        """Return True when a tomatoURL is safe to scrape for ``media_type``.
+
+        OMDb frequently returns a mismatched ``tomatoURL`` for series (e.g. the
+        show *Friends* resolves to the 1994 movie ``/m/just_friends_1994/``).
+        Scraping that page would attach an unrelated movie's audience score to
+        the series, so reject cross-type URLs. When ``media_type`` is unknown we
+        keep the legacy permissive behaviour.
+        """
+        if not media_type:
+            return True
+        path = str(tomato_url or '')
+        if media_type == 'tv':
+            return '/tv/' in path
+        if media_type == 'movie':
+            return '/m/' in path
+        return True
+
+    async def get_rating(self, imdb_id, media_type: str | None = None):
         """
         Fetch IMDB rating and vote count for a given IMDB ID.
 
         Args:
             imdb_id (str): IMDB ID in tt... format (e.g., 'tt0816692').
+            media_type (str | None): 'movie' or 'tv'. Used to reject mismatched
+                ``tomatoURL`` audience-score scrapes; ``None`` keeps legacy
+                permissive behaviour.
 
         Returns:
             dict | None: Dictionary with imdb/rt/metacritic ratings and vote
@@ -153,8 +174,19 @@ class OmdbClient(BaseHTTPClient):
                     parsed = _parse_omdb_ratings(data)
                     if parsed['rt_user_rating'] is None:
                         tomato_url = data.get('tomatoURL')
-                        if tomato_url and tomato_url != 'N/A':
+                        if (
+                            tomato_url
+                            and tomato_url != 'N/A'
+                            and self._tomato_url_matches(tomato_url, media_type)
+                        ):
                             parsed['rt_user_rating'] = await self._fetch_rt_audience_score(tomato_url)
+                        elif tomato_url and tomato_url != 'N/A':
+                            self.logger.debug(
+                                "Skipping mismatched tomatoURL for %s %s: %s",
+                                media_type,
+                                imdb_id,
+                                tomato_url,
+                            )
                     if parsed['imdb_rating'] is None:
                         self.logger.debug(
                             "No valid IMDB rating for IMDB ID %s (imdbRating=%s, imdbVotes=%s)",
