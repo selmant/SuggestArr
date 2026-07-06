@@ -47,3 +47,30 @@ def test_grouped_requests_labels_synthetic_sources(tmp_path):
     assert result["total_sources"] == 2
     assert sources[DISCOVER_SOURCE]["source_title"] == "Discover"
     assert sources[TRAKT_RECOMMENDATIONS_SOURCE]["source_title"] == "Trakt Recommendations"
+
+
+def test_save_metadata_updates_missing_image_paths(tmp_path):
+    db_file = str(tmp_path / "requests.db")
+    with (
+        patch.object(dm_mod, "DB_PATH", db_file),
+        patch("api_service.db.database_manager.load_env_vars", return_value={"DB_TYPE": "sqlite"}),
+    ):
+        DatabaseManager._instance = None
+        db = DatabaseManager()
+        db.save_metadata({"id": "34524", "title": "Teen Wolf"}, "tv")
+        db.save_request("tv", "34524", TRAKT_RECOMMENDATIONS_SOURCE)
+
+        db.save_metadata({
+            "id": "34524",
+            "title": "Teen Wolf",
+            "poster_path": "/teen-wolf.jpg",
+            "backdrop_path": "/teen-wolf-bg.jpg",
+        }, "tv")
+
+        result = db.get_all_requests_grouped_by_source(page=1, per_page=10)
+
+    DatabaseManager._instance = None
+
+    request = result["data"][0]["requests"][0]
+    assert request["poster_path"] == "https://image.tmdb.org/t/p/w500/teen-wolf.jpg"
+    assert request["backdrop_path"] == "https://image.tmdb.org/t/p/w1280/teen-wolf-bg.jpg"

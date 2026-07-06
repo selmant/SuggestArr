@@ -12,6 +12,7 @@ from api_service.config.config import load_env_vars
 from api_service.config.logger_manager import LoggerManager
 from api_service.exceptions.database_exceptions import DatabaseError
 from api_service.services.integration_sanitizer import sanitize_integration_config
+from api_service.utils.tmdb_images import tmdb_image_url
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 DB_PATH = os.path.join(BASE_DIR, 'config', 'config_files', 'requests.db')
@@ -1272,13 +1273,22 @@ class DatabaseManager:
         title = media.get('title') or media.get('name') or 'Unknown Title'
         overview = media.get('overview', '')
         release_date = media.get('release_date')
-        poster_path = media.get('poster_path', '')
+        poster_path = tmdb_image_url(
+            media.get('poster_path') or media.get('posterPath'),
+            'w500',
+        ) or ''
         rating = media.get('rating', None)
         votes = media.get('votes', None)
         origin_country = ','.join(media.get('origin_country', []))
         genre_ids = ','.join(map(str, media.get('genre_ids', [])))
-        logo_path = media.get('logo_path', '')
-        backdrop_path = media.get('backdrop_path', '')
+        logo_path = tmdb_image_url(
+            media.get('logo_path') or media.get('logoPath'),
+            'w500',
+        ) or ''
+        backdrop_path = tmdb_image_url(
+            media.get('backdrop_path') or media.get('backdropPath'),
+            'w1280',
+        ) or ''
         imdb_id = media.get('imdb_id')
         imdb_rating = media.get('imdb_rating')
         imdb_votes = media.get('imdb_votes')
@@ -1317,6 +1327,18 @@ class DatabaseManager:
                 query = query.replace("?", "%s")
             
             cursor.execute(query, params)
+
+            update_query = """
+                UPDATE metadata
+                SET poster_path = COALESCE(NULLIF(poster_path, ''), ?),
+                    backdrop_path = COALESCE(NULLIF(backdrop_path, ''), ?),
+                    logo_path = COALESCE(NULLIF(logo_path, ''), ?)
+                WHERE media_id = ? AND media_type = ?
+            """
+            update_params = (poster_path, backdrop_path, logo_path, media_id, media_type)
+            if self.db_type in ['mysql', 'postgres']:
+                update_query = update_query.replace("?", "%s")
+            cursor.execute(update_query, update_params)
             conn.commit()
 
     def get_metadata_ratings(self, media_id: str, media_type: str) -> Optional[Dict[str, Any]]:

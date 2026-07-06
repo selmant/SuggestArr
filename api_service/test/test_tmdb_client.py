@@ -181,7 +181,7 @@ class TestFormatResult(unittest.TestCase):
         self.assertEqual(result['id'], 1)
         self.assertEqual(result['title'], 'Dune')
         self.assertIn('tmdb.org', result['poster_path'])
-        self.assertIn('tmdb.org', result['backdrop_path'])
+        self.assertEqual(result['backdrop_path'], 'https://image.tmdb.org/t/p/w1280/bg.jpg')
 
     def test_formats_tv_using_name_key(self):
         client = _make_client()

@@ -11,6 +11,7 @@ import aiohttp
 import asyncio
 from api_service.services.http.base_client import BaseHTTPClient
 from api_service.config.logger_manager import LoggerManager
+from api_service.utils.tmdb_images import tmdb_image_url
 
 # Constants for HTTP status codes and timeout
 HTTP_OK = {200, 201}
@@ -568,10 +569,10 @@ class TMDbClient(BaseHTTPClient):
             'release_date': item.get('release_date') if content_type == 'movie' else item.get('first_air_date'),
             'origin_country': item.get('origin_country', []),
             'original_language': item.get('original_language', ''),
-            'poster_path': f"https://image.tmdb.org/t/p/w500{item.get('poster_path', 0)}" if item.get('poster_path') else None,
+            'poster_path': tmdb_image_url(item.get('poster_path'), "w500"),
             'overview': item.get('overview'),
             'genre_ids': item.get('genre_ids', []),
-            'backdrop_path': f"https://image.tmdb.org/t/p/w1280/{item.get('backdrop_path', 0)}" if item.get('backdrop_path') else None
+            'backdrop_path': tmdb_image_url(item.get('backdrop_path'), "w1280")
         }
 
 
@@ -744,4 +745,3 @@ class TMDbClient(BaseHTTPClient):
         except aiohttp.ClientError as e:
             self.logger.error("An error occurred while searching TMDb: %s", str(e).replace(self.api_key, "***"))
         return []
-
