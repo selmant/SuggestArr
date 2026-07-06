@@ -354,10 +354,16 @@ export default {
 }
 
 .poster-overlay--ratings {
-  top: calc(var(--spacing-sm) + 1.75rem);
+  top: var(--spacing-sm);
   right: var(--spacing-sm);
-  left: var(--spacing-sm);
+  left: auto;
+  bottom: 4.25rem;
   justify-content: flex-end;
+  align-items: flex-end;
+}
+
+.request-card--compact .poster-overlay--ratings {
+  bottom: 3.35rem;
 }
 
 .poster-overlay--bottom {
@@ -402,8 +408,7 @@ export default {
 }
 
 .poster-rating-badges {
-  width: 100%;
-  justify-content: flex-end;
+  width: auto;
 }
 
 .poster-pill--rating {

@@ -2,7 +2,11 @@
   <div
     v-if="badges.length"
     class="rating-badges"
-    :class="{ 'rating-badges--compact': compact }"
+    :class="{
+      'rating-badges--compact': compact,
+      'rating-badges--vertical': layout === 'vertical',
+      'rating-badges--horizontal': layout === 'horizontal',
+    }"
     data-testid="rating-badges">
     <span
       v-for="badge in badges"
@@ -38,6 +42,11 @@ export default {
       type: Boolean,
       default: false,
     },
+    layout: {
+      type: String,
+      default: 'vertical',
+      validator: (value) => ['vertical', 'horizontal'].includes(value),
+    },
   },
   computed: {
     badges() {
@@ -53,10 +62,20 @@ export default {
 <style scoped>
 .rating-badges {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
   gap: var(--spacing-2xs);
   max-width: 100%;
+}
+
+.rating-badges--vertical {
+  flex-direction: column;
+  align-items: flex-end;
+  flex-wrap: nowrap;
+}
+
+.rating-badges--horizontal {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .rating-badges--compact {
