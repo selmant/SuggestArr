@@ -172,6 +172,51 @@ class TraktClient(BaseHTTPClient):
             "tv": self._normalize_watched_items(shows, "show"),
         }
 
+    async def add_to_history(
+        self,
+        media_type: str,
+        tmdb_id: str,
+        watched_at: Optional[str] = None,
+    ) -> dict[str, Any]:
+        item = {"ids": {"tmdb": int(tmdb_id)}}
+        if watched_at:
+            item["watched_at"] = watched_at
+        body = self._sync_body(media_type, item)
+        return await self._request("POST", "/sync/history", json=body, authenticated=True)
+
+    async def remove_from_history(self, media_type: str, tmdb_id: str) -> dict[str, Any]:
+        body = self._sync_body(media_type, {"ids": {"tmdb": int(tmdb_id)}})
+        return await self._request("POST", "/sync/history/remove", json=body, authenticated=True)
+
+    async def add_rating(self, media_type: str, tmdb_id: str, rating: int) -> dict[str, Any]:
+        rating = int(rating)
+        if rating < 1 or rating > 10:
+            raise ValueError("Trakt rating must be between 1 and 10")
+        body = self._sync_body(media_type, {"ids": {"tmdb": int(tmdb_id)}, "rating": rating})
+        return await self._request("POST", "/sync/ratings", json=body, authenticated=True)
+
+    async def remove_rating(self, media_type: str, tmdb_id: str) -> dict[str, Any]:
+        body = self._sync_body(media_type, {"ids": {"tmdb": int(tmdb_id)}})
+        return await self._request("POST", "/sync/ratings/remove", json=body, authenticated=True)
+
+    async def get_item_sync_status(self, media_type: str, tmdb_id: str) -> dict[str, Any]:
+        tmdb_id = str(tmdb_id)
+        if media_type == "movie":
+            watched_payload = await self._request("GET", "/sync/watched/movies", authenticated=True)
+            ratings_payload = await self._request("GET", "/sync/ratings/movies", authenticated=True)
+            item_key = "movie"
+        elif media_type == "tv":
+            watched_payload = await self._request("GET", "/sync/watched/shows", authenticated=True)
+            ratings_payload = await self._request("GET", "/sync/ratings/shows", authenticated=True)
+            item_key = "show"
+        else:
+            raise ValueError(f"Unsupported media_type: {media_type}")
+
+        return {
+            "watched": self._payload_contains_tmdb(watched_payload, item_key, tmdb_id),
+            "rating": self._find_rating_for_tmdb(ratings_payload, item_key, tmdb_id),
+        }
+
     async def get_recommendations(
         self,
         media_type: str,
@@ -217,6 +262,31 @@ class TraktClient(BaseHTTPClient):
         path = "/sync/watched/movies" if media_type == "movie" else "/sync/watched/shows"
         payload = await self._request("GET", path, authenticated=True)
         return {item["tmdb_id"] for item in self._normalize_watched_items(payload, item_key)}
+
+    @staticmethod
+    def _sync_body(media_type: str, item: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+        if media_type == "movie":
+            return {"movies": [item]}
+        if media_type == "tv":
+            return {"shows": [item]}
+        raise ValueError(f"Unsupported media_type: {media_type}")
+
+    @staticmethod
+    def _payload_contains_tmdb(payload: list[dict[str, Any]], item_key: str, tmdb_id: str) -> bool:
+        for entry in payload or []:
+            ids = ((entry or {}).get(item_key) or {}).get("ids") or {}
+            if str(ids.get("tmdb") or "") == str(tmdb_id):
+                return True
+        return False
+
+    @staticmethod
+    def _find_rating_for_tmdb(payload: list[dict[str, Any]], item_key: str, tmdb_id: str) -> Optional[int]:
+        for entry in payload or []:
+            ids = ((entry or {}).get(item_key) or {}).get("ids") or {}
+            if str(ids.get("tmdb") or "") == str(tmdb_id):
+                rating = entry.get("rating")
+                return int(rating) if rating is not None else None
+        return None
 
     async def _request(
         self,

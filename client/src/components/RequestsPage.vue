@@ -387,6 +387,47 @@
                 <div v-else class="modal-poster-placeholder">
                   <i class="fas fa-image text-6xl"></i>
                 </div>
+
+                <div v-if="canManageTrakt(selectedSource)" class="trakt-action-strip">
+                  <div class="trakt-action-main">
+                    <span class="trakt-action-label">
+                      <i class="icon-trakt"></i>
+                      Trakt
+                    </span>
+                    <span v-if="traktStatusLoading" class="trakt-action-state">Checking...</span>
+                    <span v-else-if="traktStatusError" class="trakt-action-state trakt-action-state--warn">
+                      {{ traktStatusError }}
+                    </span>
+                    <span v-else class="trakt-action-state">
+                      {{ traktStatus?.watched ? 'Watched' : 'Unwatched' }}
+                      <template v-if="traktStatus?.rating">- {{ traktStatus.rating }}/10</template>
+                    </span>
+                  </div>
+
+                  <div class="trakt-action-controls">
+                    <button
+                      type="button"
+                      class="trakt-toggle-btn"
+                      :class="{ active: traktStatus?.watched }"
+                      :disabled="traktActionLoading || traktStatusLoading"
+                      @click="toggleTraktWatched">
+                      <i :class="traktStatus?.watched ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                      {{ traktStatus?.watched ? 'Mark unwatched' : 'Mark watched' }}
+                    </button>
+                    <label class="trakt-points-select">
+                      <span>Points</span>
+                      <select
+                        v-model="traktRatingPoints"
+                        :disabled="traktActionLoading || traktStatusLoading"
+                        @change="rateSelectedOnTrakt">
+                        <option value="">None</option>
+                        <option v-for="point in traktPointOptions" :key="point" :value="point">
+                          {{ point }}/10
+                        </option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
               </div>
 
               <!-- Right: Details -->
@@ -497,7 +538,13 @@ import Footer from './AppFooter.vue';
 import BaseDropdown from '@/components/common/BaseDropdown.vue';
 import { formatDate } from '@/utils/dateUtils.js';
 import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
-import { getAiSearchRequests } from '@/api/api.js';
+import {
+  getAiSearchRequests,
+  getRequestTraktStatus,
+  markRequestWatched,
+  rateRequestOnTrakt,
+  unmarkRequestWatched,
+} from '@/api/api.js';
 
 export default {
   name: "RequestsPage",
@@ -542,6 +589,12 @@ export default {
       aiRequestsPage: 1,
       aiRequestsTotalPages: 1,
       aiObserver: null,
+      traktStatus: null,
+      traktStatusLoading: false,
+      traktActionLoading: false,
+      traktStatusError: '',
+      traktRatingPoints: '',
+      traktPointOptions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
       sortOptions: [
         { value: 'date-desc', label: 'Date (Newest)' },
         { value: 'date-asc', label: 'Date (Oldest)' },
@@ -698,6 +751,93 @@ export default {
     sourceHasMixedMediaTypes(source) {
       const types = new Set((source?.requests || []).map((request) => request.media_type));
       return types.size > 1;
+    },
+
+    canManageTrakt(item) {
+      return Boolean(
+        item &&
+        item.request_id &&
+        item.user_id &&
+        item.media_type &&
+        !item.requests
+      );
+    },
+
+    applyTraktStatus(status) {
+      this.traktStatus = status || null;
+      const rating = status?.rating;
+      this.traktRatingPoints = rating ? String(rating) : '';
+    },
+
+    async loadTraktStatus() {
+      if (!this.canManageTrakt(this.selectedSource)) {
+        this.applyTraktStatus(null);
+        return;
+      }
+
+      this.traktStatusLoading = true;
+      this.traktStatusError = '';
+      try {
+        const response = await getRequestTraktStatus(
+          this.selectedSource.request_id,
+          this.selectedSource.media_type,
+          this.selectedSource.user_id,
+        );
+        this.applyTraktStatus(response.data);
+      } catch (error) {
+        this.applyTraktStatus(null);
+        this.traktStatusError = error.response?.data?.message || 'Trakt unavailable';
+      } finally {
+        this.traktStatusLoading = false;
+      }
+    },
+
+    async toggleTraktWatched() {
+      if (!this.canManageTrakt(this.selectedSource) || this.traktActionLoading) return;
+
+      this.traktActionLoading = true;
+      this.traktStatusError = '';
+      try {
+        const response = this.traktStatus?.watched
+          ? await unmarkRequestWatched(
+              this.selectedSource.request_id,
+              this.selectedSource.media_type,
+              this.selectedSource.user_id,
+            )
+          : await markRequestWatched(
+              this.selectedSource.request_id,
+              this.selectedSource.media_type,
+              this.selectedSource.user_id,
+              this.traktRatingPoints || null,
+            );
+        this.applyTraktStatus(response.data);
+      } catch (error) {
+        this.traktStatusError = error.response?.data?.message || 'Could not update Trakt';
+      } finally {
+        this.traktActionLoading = false;
+      }
+    },
+
+    async rateSelectedOnTrakt() {
+      if (!this.canManageTrakt(this.selectedSource) || !this.traktRatingPoints || this.traktActionLoading) {
+        return;
+      }
+
+      this.traktActionLoading = true;
+      this.traktStatusError = '';
+      try {
+        const response = await rateRequestOnTrakt(
+          this.selectedSource.request_id,
+          this.selectedSource.media_type,
+          this.selectedSource.user_id,
+          this.traktRatingPoints,
+        );
+        this.applyTraktStatus(response.data);
+      } catch (error) {
+        this.traktStatusError = error.response?.data?.message || 'Could not rate on Trakt';
+      } finally {
+        this.traktActionLoading = false;
+      }
     },
 
     resetAndReload() {
@@ -911,13 +1051,18 @@ export default {
 
     openModal(source, isAiRequest = false) {
       this.selectedSource = { ...source, _isAiRequest: isAiRequest };
+      this.applyTraktStatus(null);
+      this.traktStatusError = '';
       this.showModal = true;
       document.body.style.overflow = 'hidden';
+      this.$nextTick(() => this.loadTraktStatus());
     },
 
     closeModal() {
       this.showModal = false;
       this.selectedSource = null;
+      this.applyTraktStatus(null);
+      this.traktStatusError = '';
       document.body.style.overflow = 'auto';
     },
   },

@@ -358,3 +358,74 @@ async def test_401_refreshes_once_and_retries():
     assert client.access_token == "new-access"
     db.update_trakt_oauth_tokens.assert_not_called()
     db.set_integration.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_add_to_history_posts_movie_with_tmdb_id():
+    session = FakeSession([FakeResponse(200, {"added": {"movies": 1, "episodes": 0}})])
+    client = TraktClient("cid", "secret", "access", "refresh", expires_at=int(time.time()) + 3600, session=session)
+
+    result = await client.add_to_history("movie", "550", watched_at="2024-01-01T00:00:00.000Z")
+
+    assert result["added"]["movies"] == 1
+    assert session.calls[0][0] == "POST"
+    assert session.calls[0][1] == "https://api.trakt.tv/sync/history"
+    assert session.calls[0][2]["json"] == {
+        "movies": [{"ids": {"tmdb": 550}, "watched_at": "2024-01-01T00:00:00.000Z"}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_remove_from_history_posts_show_with_tmdb_id():
+    session = FakeSession([FakeResponse(200, {"deleted": {"shows": 1}})])
+    client = TraktClient("cid", "secret", "access", "refresh", expires_at=int(time.time()) + 3600, session=session)
+
+    result = await client.remove_from_history("tv", "95396")
+
+    assert result["deleted"]["shows"] == 1
+    assert session.calls[0][0] == "POST"
+    assert session.calls[0][1] == "https://api.trakt.tv/sync/history/remove"
+    assert session.calls[0][2]["json"] == {
+        "shows": [{"ids": {"tmdb": 95396}}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_add_rating_posts_movie_with_tmdb_id_and_integer_rating():
+    session = FakeSession([FakeResponse(200, {"added": {"movies": 1}})])
+    client = TraktClient("cid", "secret", "access", "refresh", expires_at=int(time.time()) + 3600, session=session)
+
+    await client.add_rating("movie", "550", 9)
+
+    assert session.calls[0][0] == "POST"
+    assert session.calls[0][1] == "https://api.trakt.tv/sync/ratings"
+    assert session.calls[0][2]["json"] == {
+        "movies": [{"ids": {"tmdb": 550}, "rating": 9}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_remove_rating_posts_movie_with_tmdb_id():
+    session = FakeSession([FakeResponse(200, {"deleted": {"movies": 1}})])
+    client = TraktClient("cid", "secret", "access", "refresh", expires_at=int(time.time()) + 3600, session=session)
+
+    await client.remove_rating("movie", "550")
+
+    assert session.calls[0][0] == "POST"
+    assert session.calls[0][1] == "https://api.trakt.tv/sync/ratings/remove"
+    assert session.calls[0][2]["json"] == {
+        "movies": [{"ids": {"tmdb": 550}}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_item_sync_status_reads_watched_and_rating():
+    session = FakeSession([
+        FakeResponse(200, [{"movie": {"ids": {"tmdb": 550}}}]),
+        FakeResponse(200, [{"rating": 9, "movie": {"ids": {"tmdb": 550}}}]),
+    ])
+    client = TraktClient("cid", "secret", "access", "refresh", expires_at=int(time.time()) + 3600, session=session)
+
+    result = await client.get_item_sync_status("movie", "550")
+
+    assert result == {"watched": True, "rating": 9}

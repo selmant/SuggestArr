@@ -1,11 +1,18 @@
 import asyncio
 import threading
+from asgiref.sync import async_to_sync
 from flask import Blueprint, jsonify, request
 from api_service.auth.limiter import limiter
 from api_service.auth.middleware import require_role
 from api_service.automate_process import ContentAutomation
 from api_service.config.logger_manager import LoggerManager
 from api_service.db.database_manager import DatabaseManager
+from api_service.services.trakt.request_actions import (
+    get_request_trakt_status,
+    mark_request_watched,
+    set_request_rating,
+    unmark_request_watched,
+)
 from api_service.utils.asyncio_loop import close_event_loop
 
 logger = LoggerManager().get_logger("AutomationRoute")
@@ -13,6 +20,18 @@ automation_bp = Blueprint('automation', __name__)
 
 _force_run_lock = threading.Lock()
 _force_run_running = False
+_VALID_MEDIA_TYPES = frozenset({"movie", "tv"})
+
+
+def _get_json() -> dict:
+    return request.get_json(silent=True) or {}
+
+
+def _validate_media_type(media_type: str) -> str:
+    normalized = str(media_type or "").lower()
+    if normalized not in _VALID_MEDIA_TYPES:
+        raise ValueError("media_type must be movie or tv")
+    return normalized
 
 
 def _run_automation_in_background():
@@ -104,4 +123,114 @@ def get_requests_stats():
         return jsonify(stats), 200
     except Exception as e:
         logger.error(f"Error retrieving request stats: {e}", exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/<tmdb_id>/<media_type>/trakt/status', methods=['GET'])
+def get_request_trakt_status_route(tmdb_id: str, media_type: str):
+    """Return Trakt watched/rating status for a request's media user."""
+    try:
+        media_type = _validate_media_type(media_type)
+        user_id = request.args.get('user_id', type=str)
+        if not user_id:
+            return jsonify({"message": "user_id is required"}), 400
+        result = async_to_sync(get_request_trakt_status)(
+            DatabaseManager(), tmdb_id, media_type, user_id,
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message.lower() or "not linked" in message.lower() else 400
+        return jsonify({"message": message}), status
+    except RuntimeError as exc:
+        logger.warning("Trakt status failed for %s/%s: %s", media_type, tmdb_id, exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error fetching Trakt status: %s", exc, exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/<tmdb_id>/<media_type>/trakt/mark-watched', methods=['POST'])
+def mark_request_watched_route(tmdb_id: str, media_type: str):
+    """Mark a request as watched on Trakt for the request's media user."""
+    try:
+        media_type = _validate_media_type(media_type)
+        payload = _get_json()
+        user_id = str(payload.get("user_id") or "")
+        if not user_id:
+            return jsonify({"message": "user_id is required"}), 400
+        result = async_to_sync(mark_request_watched)(
+            DatabaseManager(),
+            tmdb_id,
+            media_type,
+            user_id,
+            str(payload.get("watched_at") or "now"),
+            payload.get("rating_stars"),
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message.lower() or "not linked" in message.lower() else 400
+        return jsonify({"message": message}), status
+    except RuntimeError as exc:
+        logger.warning("Trakt mark-watched failed for %s/%s: %s", media_type, tmdb_id, exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error marking request watched on Trakt: %s", exc, exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/<tmdb_id>/<media_type>/trakt/unmark-watched', methods=['POST'])
+def unmark_request_watched_route(tmdb_id: str, media_type: str):
+    """Remove a request from Trakt watch history for the request's media user."""
+    try:
+        media_type = _validate_media_type(media_type)
+        payload = _get_json()
+        user_id = str(payload.get("user_id") or "")
+        if not user_id:
+            return jsonify({"message": "user_id is required"}), 400
+        result = async_to_sync(unmark_request_watched)(
+            DatabaseManager(),
+            tmdb_id,
+            media_type,
+            user_id,
+            bool(payload.get("remove_rating", False)),
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message.lower() or "not linked" in message.lower() else 400
+        return jsonify({"message": message}), status
+    except RuntimeError as exc:
+        logger.warning("Trakt unmark failed for %s/%s: %s", media_type, tmdb_id, exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error unmarking request on Trakt: %s", exc, exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/<tmdb_id>/<media_type>/trakt/rate', methods=['POST'])
+def rate_request_route(tmdb_id: str, media_type: str):
+    """Set a Trakt star rating for a request's media user."""
+    try:
+        media_type = _validate_media_type(media_type)
+        payload = _get_json()
+        user_id = str(payload.get("user_id") or "")
+        if not user_id:
+            return jsonify({"message": "user_id is required"}), 400
+        if payload.get("rating_stars") is None:
+            return jsonify({"message": "rating_stars is required"}), 400
+        result = async_to_sync(set_request_rating)(
+            DatabaseManager(), tmdb_id, media_type, user_id, payload.get("rating_stars"),
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message.lower() or "not linked" in message.lower() else 400
+        return jsonify({"message": message}), status
+    except RuntimeError as exc:
+        logger.warning("Trakt rating failed for %s/%s: %s", media_type, tmdb_id, exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error rating request on Trakt: %s", exc, exc_info=True)
         return jsonify({"error": "An internal error occurred"}), 500

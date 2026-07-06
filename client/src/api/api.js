@@ -103,6 +103,34 @@ export const getAiSearchRequests = (page = 1, perPage = 12, sortBy = 'date-desc'
     });
 };
 
+export const getRequestTraktStatus = (tmdbId, mediaType, userId) => {
+    return axios.get(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/trakt/status`, {
+        params: { user_id: userId },
+    });
+};
+
+export const markRequestWatched = (tmdbId, mediaType, userId, ratingPoints = null) => {
+    const payload = { user_id: userId, watched_at: 'now' };
+    if (ratingPoints !== null && ratingPoints !== '') {
+        payload.rating_stars = Number(ratingPoints) / 2;
+    }
+    return axios.post(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/trakt/mark-watched`, payload);
+};
+
+export const unmarkRequestWatched = (tmdbId, mediaType, userId, removeRating = false) => {
+    return axios.post(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/trakt/unmark-watched`, {
+        user_id: userId,
+        remove_rating: removeRating,
+    });
+};
+
+export const rateRequestOnTrakt = (tmdbId, mediaType, userId, ratingPoints) => {
+    return axios.post(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/trakt/rate`, {
+        user_id: userId,
+        rating_stars: Number(ratingPoints) / 2,
+    });
+};
+
 // AI Search: request a specific TMDB item via Seer
 export const aiSearchRequest = (tmdbId, mediaType, rationale = '', metadata = {}, searchQuery = '') => {
     return axios.post('/api/ai-search/request', {
