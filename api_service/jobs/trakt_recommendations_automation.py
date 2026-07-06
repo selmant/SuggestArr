@@ -182,6 +182,7 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
         per_type_limit = fetch_limit if len(media_types) == 1 else max(fetch_limit // 2, max_results)
 
         raw_items: List[Dict[str, Any]] = []
+        trakt_counts: Dict[str, int] = {}
         for item_type in media_types:
             trakt_items = await self.trakt_client.get_recommendations(
                 item_type,
@@ -189,23 +190,53 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
                 ignore_collected=ignore_collected,
                 ignore_watched=ignore_watched,
             )
+            trakt_counts[item_type] = len(trakt_items)
             for item in trakt_items:
                 raw_items.append({**item, "media_type": item_type})
 
         filtered: List[Dict[str, Any]] = []
+        stats = {
+            "missing_tmdb_id": 0,
+            "skipped_dedup": 0,
+            "failed_quality_filter": 0,
+            "kept": 0,
+        }
         for item in raw_items:
             item_media_type = item.get("media_type") or media_type
             tmdb_id = item.get("tmdb_id")
             if not tmdb_id:
+                stats["missing_tmdb_id"] += 1
                 continue
             if await self._should_skip_global_request(item_media_type, tmdb_id):
+                stats["skipped_dedup"] += 1
                 continue
 
             enriched = await self._enrich_and_filter_item(item)
             if enriched:
                 filtered.append(enriched)
+                stats["kept"] += 1
+            else:
+                stats["failed_quality_filter"] += 1
             if len(filtered) >= max_results:
                 break
+
+        self.logger.info(
+            "Trakt recommendations fetch stats (target=%d, media_type=%s, "
+            "per_type_limit=%d, ignore_collected=%s, ignore_watched=%s): "
+            "trakt_returned=%s, raw=%d, missing_tmdb=%d, skipped_dedup=%d, "
+            "failed_quality_filter=%d, kept=%d",
+            max_results,
+            media_type,
+            per_type_limit,
+            ignore_collected,
+            ignore_watched,
+            trakt_counts,
+            len(raw_items),
+            stats["missing_tmdb_id"],
+            stats["skipped_dedup"],
+            stats["failed_quality_filter"],
+            stats["kept"],
+        )
         return filtered[:max_results]
 
     async def filter_and_request(

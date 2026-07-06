@@ -225,6 +225,15 @@ class TraktListAutomation(TraktJobAutomationBase):
 
         filtered: List[Dict[str, Any]] = []
         collected_keys: set[tuple[str, str]] = set()
+        stats = {
+            "pages_fetched": 0,
+            "raw_items": 0,
+            "duplicate_items": 0,
+            "missing_tmdb_id": 0,
+            "skipped_dedup": 0,
+            "failed_quality_filter": 0,
+            "kept": 0,
+        }
 
         for page in range(1, MAX_FETCH_PAGES + 1):
             if self.use_watchlist:
@@ -248,14 +257,19 @@ class TraktListAutomation(TraktJobAutomationBase):
             if not raw_items:
                 break
 
+            stats["pages_fetched"] = page
+            stats["raw_items"] += len(raw_items)
+
             for item in raw_items:
                 item_media_type = item.get("media_type") or media_type
                 tmdb_id = item.get("tmdb_id")
                 if not tmdb_id:
+                    stats["missing_tmdb_id"] += 1
                     continue
 
                 seen_key = (str(tmdb_id), item_media_type)
                 if seen_key in collected_keys:
+                    stats["duplicate_items"] += 1
                     continue
                 collected_keys.add(seen_key)
 
@@ -265,17 +279,35 @@ class TraktListAutomation(TraktJobAutomationBase):
                     dedup_mode,
                     per_list_seen,
                 ):
+                    stats["skipped_dedup"] += 1
                     continue
 
                 enriched = await self._enrich_and_filter_item(item)
                 if enriched:
                     filtered.append(enriched)
+                    stats["kept"] += 1
+                else:
+                    stats["failed_quality_filter"] += 1
                 if len(filtered) >= max_results:
                     break
 
             if len(filtered) >= max_results:
                 break
 
+        self.logger.info(
+            "Trakt list fetch stats (target=%d, dedup=%s): pages=%d, raw=%d, "
+            "duplicate=%d, missing_tmdb=%d, skipped_dedup=%d, "
+            "failed_quality_filter=%d, kept=%d",
+            max_results,
+            dedup_mode,
+            stats["pages_fetched"],
+            stats["raw_items"],
+            stats["duplicate_items"],
+            stats["missing_tmdb_id"],
+            stats["skipped_dedup"],
+            stats["failed_quality_filter"],
+            stats["kept"],
+        )
         return filtered[:max_results]
 
     async def filter_and_request(
