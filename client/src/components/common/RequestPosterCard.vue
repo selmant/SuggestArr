@@ -46,7 +46,7 @@
         data-testid="seer-poster-actions"
         @click.stop>
         <div class="seer-poster-dock__status" data-testid="seer-poster-state">
-          <i class="fas fa-inbox"></i>
+          <i :class="seerStatusIcon"></i>
           <span>{{ seerLabel }}</span>
         </div>
         <div v-if="seerCanAction" class="seer-poster-dock__controls">
@@ -218,6 +218,18 @@ export default {
   },
   emits: ['select', 'set-trakt-watched', 'rate-trakt', 'approve-seer', 'decline-seer'],
   computed: {
+    seerStatusIcon() {
+      const icons = {
+        pending: 'fas fa-hourglass-half',
+        approved: 'fas fa-check',
+        processing: 'fas fa-spinner fa-spin',
+        declined: 'fas fa-ban',
+        available: 'fas fa-check-double',
+        partially_available: 'fas fa-adjust',
+        not_found: 'fas fa-inbox',
+      };
+      return icons[this.seerStatus] || 'fas fa-inbox';
+    },
     posterDockClasses() {
       return {
         'request-card-poster--with-seer': this.showSeerActions,
