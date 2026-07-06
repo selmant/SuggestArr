@@ -16,9 +16,6 @@
           <i :class="item.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
           {{ mediaTypeLabel }}
         </span>
-      </div>
-
-      <div class="poster-overlay poster-overlay--ratings">
         <RatingBadges
           class="poster-rating-badges"
           :item="item"
@@ -350,20 +347,9 @@ export default {
   top: var(--spacing-sm);
   right: var(--spacing-sm);
   left: var(--spacing-sm);
-  justify-content: flex-start;
-}
-
-.poster-overlay--ratings {
-  top: var(--spacing-sm);
-  right: var(--spacing-sm);
-  left: auto;
-  bottom: 4.25rem;
-  justify-content: flex-end;
-  align-items: flex-end;
-}
-
-.request-card--compact .poster-overlay--ratings {
-  bottom: 3.35rem;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--spacing-xs);
 }
 
 .poster-overlay--bottom {
@@ -408,7 +394,23 @@ export default {
 }
 
 .poster-rating-badges {
-  width: auto;
+  flex: 0 1 auto;
+  max-width: 52%;
+}
+
+.poster-rating-badges :deep(.rating-badges--vertical) {
+  gap: 0.14rem;
+  padding: 0.2rem;
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.poster-rating-badges :deep(.rating-badge) {
+  justify-content: space-between;
+  min-width: 3.4rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .poster-pill--rating {

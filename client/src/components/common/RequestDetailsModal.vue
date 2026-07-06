@@ -27,9 +27,6 @@
                     <i :class="selectedSource.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
                     {{ selectedSource.media_type.toUpperCase() }}
                   </span>
-                </div>
-
-                <div class="request-details-modal__poster-overlay request-details-modal__poster-overlay--ratings">
                   <RatingBadges
                     class="request-details-modal__rating-badges"
                     :item="selectedSource"
@@ -614,16 +611,9 @@ export default {
   top: var(--spacing-sm);
   right: var(--spacing-sm);
   left: var(--spacing-sm);
-  justify-content: flex-start;
-}
-
-.request-details-modal__poster-overlay--ratings {
-  top: var(--spacing-sm);
-  right: var(--spacing-sm);
-  left: auto;
-  bottom: 4.25rem;
-  justify-content: flex-end;
-  align-items: flex-end;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--spacing-xs);
 }
 
 .request-details-modal__poster-overlay--bottom {
@@ -665,7 +655,23 @@ export default {
 }
 
 .request-details-modal__rating-badges {
-  width: auto;
+  flex: 0 1 auto;
+  max-width: 52%;
+}
+
+.request-details-modal__rating-badges :deep(.rating-badges--vertical) {
+  gap: 0.14rem;
+  padding: 0.2rem;
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.request-details-modal__rating-badges :deep(.rating-badge) {
+  justify-content: space-between;
+  min-width: 3.4rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .request-details-modal__context-row .rating-badges {

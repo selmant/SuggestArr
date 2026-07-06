@@ -180,6 +180,7 @@
                     </span>
                     <RatingBadges
                       v-if="!source.visual"
+                      layout="horizontal"
                       :item="source"
                       :badge-settings="ratingBadgeSettings"
                       :compact="true" />
