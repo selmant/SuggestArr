@@ -103,10 +103,19 @@
                 :disabled="loading"
                 id="mediaType"
               />
+
+              <!-- Seer Status Filter -->
+              <BaseDropdown
+                v-model="seerStatusFilter"
+                :options="seerStatusFilterOptions"
+                placeholder="Select Seer status"
+                :disabled="loading"
+                id="seerStatus"
+              />
             
               <!-- Clear Filters -->
               <button 
-                v-if="sortBy !== 'date-desc' || mediaTypeFilter !== 'all'" 
+                v-if="hasActiveFilters" 
                 @click="clearFilters" 
                 class="clear-filters-btn">
                 <i class="fas fa-undo"></i>
@@ -116,8 +125,8 @@
           </div>
         
           <!-- Search Results Count -->
-          <div class="search-results-count" v-if="searchQuery || mediaTypeFilter !== 'all'">
-            Found {{ viewMode === 'by-content' ? filteredAndSortedSources.length : filteredAndSortedRequests.length }} result(s)
+          <div class="search-results-count" v-if="hasActiveFilters">
+            Found {{ activeFilteredCount }} result(s)
           </div>
         </div>
 
@@ -223,7 +232,7 @@
               tag="div"
               class="requests-grid">
               <RequestPosterCard
-                v-for="item in aiRequests"
+                v-for="item in filteredAiRequests"
                 :key="item.request_id"
                 :item="item"
                 source-mode="ai"
@@ -269,10 +278,10 @@
         <div v-if="viewMode !== 'ai-requests' && (viewMode === 'by-content' ? filteredAndSortedSources : filteredAndSortedRequests).length === 0 && !loading" class="no-results">
           <i class="fas fa-inbox text-6xl mb-4"></i>
           <h3>No {{ viewMode === 'by-content' ? 'content' : 'requests' }} found</h3>
-          <p v-if="searchQuery || mediaTypeFilter !== 'all'">Try adjusting your filters</p>
+          <p v-if="hasActiveFilters">Try adjusting your filters</p>
           <p v-else>Start watching content to see suggestions here</p>
         </div>
-        <div v-if="viewMode === 'ai-requests' && aiRequests.length === 0 && !loading" class="no-results">
+        <div v-if="viewMode === 'ai-requests' && filteredAiRequests.length === 0 && !loading" class="no-results">
           <i class="fas fa-magic text-6xl mb-4"></i>
           <h3>No AI Search requests yet</h3>
           <p>Use the <strong>AI Search</strong> tab to discover and request content.</p>
@@ -336,6 +345,7 @@ import BaseDropdown from '@/components/common/BaseDropdown.vue';
 import RequestPosterCard from '@/components/common/RequestPosterCard.vue';
 import RequestDetailsModal from '@/components/common/RequestDetailsModal.vue';
 import { formatDate } from '@/utils/dateUtils.js';
+import { SEER_STATUS_FILTER_OPTIONS } from '@/utils/seerStatus.js';
 import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
 import {
   getAiSearchRequests,
@@ -371,6 +381,7 @@ export default {
       searchQuery: "",
       sortBy: 'date-desc',
       mediaTypeFilter: 'all',
+      seerStatusFilter: 'all',
       showModal: false,
       selectedSource: null,
       loading: false,
@@ -398,10 +409,28 @@ export default {
         { value: 'all', label: 'All Types' },
         { value: 'movie', label: 'Movies' },
         { value: 'tv', label: 'TV Shows' }
-      ]
+      ],
+      seerStatusFilterOptions: SEER_STATUS_FILTER_OPTIONS,
     };
   },
   computed: {
+    hasActiveFilters() {
+      return this.sortBy !== 'date-desc'
+        || this.mediaTypeFilter !== 'all'
+        || this.seerStatusFilter !== 'all'
+        || Boolean(this.searchQuery);
+    },
+
+    activeFilteredCount() {
+      if (this.viewMode === 'by-content') {
+        return this.filteredAndSortedSources.length;
+      }
+      if (this.viewMode === 'ai-requests') {
+        return this.filteredAiRequests.length;
+      }
+      return this.filteredAndSortedRequests.length;
+    },
+
     totalRequests() {
       return this.totalRequestsCount || this.sources.reduce((sum, source) => sum + source.requests.length, 0);
     },
@@ -425,21 +454,13 @@ export default {
 
     filteredSources() {
       const query = this.searchQuery.toLowerCase();
-      let filtered = this.sources;
-
-      if (this.mediaTypeFilter !== 'all') {
-        filtered = filtered
-          .map((source) => {
-            const matchingRequests = source.requests.filter(
-              (request) => request.media_type === this.mediaTypeFilter
-            );
-            if (matchingRequests.length === 0) {
-              return null;
-            }
-            return { ...source, requests: matchingRequests };
-          })
-          .filter(Boolean);
-      }
+      let filtered = this.sources.map((source) => {
+        const requests = this.filterRequestList(source.requests);
+        if (requests.length === 0) {
+          return null;
+        }
+        return { ...source, requests };
+      }).filter(Boolean);
 
       if (query) {
         filtered = filtered.filter((source) => {
@@ -456,18 +477,25 @@ export default {
 
     filteredAllRequests() {
       const query = this.searchQuery.toLowerCase();
-      let filtered = [...this.allRequestsFlat];
+      let filtered = this.filterRequestList(this.allRequestsFlat);
 
-      // Filter by media type (client-side)
-      if (this.mediaTypeFilter !== 'all') {
-        filtered = filtered.filter(request => request.media_type === this.mediaTypeFilter);
-      }
-
-      // Filter by search query (client-side)
       if (query) {
         filtered = filtered.filter(request =>
           (request.title && request.title.toLowerCase().includes(query)) ||
           (request.source_title && request.source_title.toLowerCase().includes(query))
+        );
+      }
+
+      return filtered;
+    },
+
+    filteredAiRequests() {
+      const query = this.searchQuery.toLowerCase();
+      let filtered = this.filterRequestList(this.aiRequests);
+
+      if (query) {
+        filtered = filtered.filter((request) =>
+          request.title && request.title.toLowerCase().includes(query)
         );
       }
 
@@ -511,9 +539,17 @@ export default {
     },
     
     mediaTypeFilter() {
-      this.$nextTick(() => {
-        this.initObserver();
-      });
+      this.reinitObserverAfterFilter();
+    },
+
+    seerStatusFilter() {
+      if (this.seerStatusFilter !== 'all') {
+        const items = this.viewMode === 'ai-requests'
+          ? this.aiRequests
+          : this.allRequestsFlat;
+        this.prefetchPosterSeerStatuses(items);
+      }
+      this.reinitObserverAfterFilter();
     },
     
     searchQuery() {
@@ -524,6 +560,25 @@ export default {
   },
   methods: {
     formatDate,
+
+    filterRequestList(requests) {
+      let filtered = [...(requests || [])];
+
+      if (this.mediaTypeFilter !== 'all') {
+        filtered = filtered.filter((request) => request.media_type === this.mediaTypeFilter);
+      }
+
+      if (this.seerStatusFilter !== 'all') {
+        filtered = filtered.filter((request) => this.requestMatchesSeerStatusFilter(request));
+      }
+
+      return filtered;
+    },
+
+    requestMatchesSeerStatusFilter(request) {
+      const status = this.getSeerStatus(request)?.seer_status;
+      return status === this.seerStatusFilter;
+    },
 
     getSourceVisual(source) {
       return source?.visual ?? getRequestSourceVisual(source);
@@ -579,6 +634,7 @@ export default {
         this.aiRequestsPage = page;
         this.aiRequestsTotalPages = total_pages;
         this.$nextTick(() => {
+          this.prefetchPosterSeerStatuses(this.aiRequests);
           setTimeout(() => this.initAiObserver(), 150);
         });
       } catch (error) {
@@ -610,6 +666,7 @@ export default {
     clearFilters() {
       this.sortBy = 'date-desc';
       this.mediaTypeFilter = 'all';
+      this.seerStatusFilter = 'all';
       this.searchQuery = '';
     },
 

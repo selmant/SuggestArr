@@ -29,4 +29,7 @@ test('request details modal renders Seer actions for selected and related reques
   assert.match(requestsPageSource, /useRequestSeerActions/);
   assert.match(requestsPageSource, /posterSeerProps/);
   assert.match(requestsPageSource, /prefetchPosterSeerStatuses/);
+  assert.match(requestsPageSource, /seerStatusFilter/);
+  assert.match(requestsPageSource, /SEER_STATUS_FILTER_OPTIONS/);
+  assert.match(requestsPageSource, /filterRequestList/);
 });
