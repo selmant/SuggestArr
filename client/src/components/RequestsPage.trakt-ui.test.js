@@ -4,6 +4,7 @@ import { test } from 'node:test';
 
 const requestsPageSource = readFileSync(new URL('./RequestsPage.vue', import.meta.url), 'utf8');
 const detailsModalSource = readFileSync(new URL('./common/RequestDetailsModal.vue', import.meta.url), 'utf8');
+const requestPosterCardSource = readFileSync(new URL('./common/RequestPosterCard.vue', import.meta.url), 'utf8');
 
 test('request details modal renders Trakt actions for selected and related requests', () => {
   assert.match(requestsPageSource, /:trakt-modal-target="getTraktModalTarget\(selectedSource\)"/);
@@ -20,4 +21,7 @@ test('request details modal renders Trakt actions for selected and related reque
   assert.match(detailsModalSource, /@click\.stop="\$emit\('toggle-related-trakt-watched', request\)"/);
   assert.match(detailsModalSource, /@change\.stop="\$emit\('rate-related-on-trakt', request, \$event\)"/);
   assert.match(detailsModalSource, /traktRequestActions\.css/);
+  assert.match(requestPosterCardSource, /data-testid="trakt-poster-actions"/);
+  assert.match(requestPosterCardSource, /data-testid="trakt-poster-mark-watched"/);
+  assert.match(requestsPageSource, /prefetchPosterTraktStatuses/);
 });

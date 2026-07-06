@@ -247,6 +247,14 @@
                 v-for="request in filteredAndSortedRequests" 
                 :key="request.request_id"
                 :item="request"
+                :show-trakt-actions="canShowRelatedTrakt(request)"
+                :trakt-label="getTraktInlineLabel(request)"
+                :trakt-watched="Boolean(getTraktStatus(request)?.watched)"
+                :trakt-busy="isTraktBusy(request)"
+                :trakt-rating-points="getTraktRatingPoints(request)"
+                :trakt-point-options="traktPointOptions"
+                @toggle-trakt-watched="toggleTraktWatchedFor(request)"
+                @rate-trakt="rateRequestOnTraktFromPoster(request, $event)"
                 @select="openModal" />
             </transition-group>
 
@@ -779,6 +787,16 @@ export default {
       }
     },
 
+    async rateRequestOnTraktFromPoster(item, points) {
+      await this.rateRequestOnTraktFromModal(item, { target: { value: points } });
+    },
+
+    prefetchPosterTraktStatuses() {
+      this.allRequestsFlat
+        .filter((request) => this.canShowRelatedTrakt(request))
+        .forEach((request) => this.loadTraktStatusFor(request));
+    },
+
     async rateRequestOnTraktFromModal(item, event) {
       const points = event.target.value;
       const key = this.traktRequestKey(item);
@@ -988,6 +1006,7 @@ export default {
         this.currentPage = page;
 
         this.$nextTick(() => {
+          this.prefetchPosterTraktStatuses();
           setTimeout(() => {
             this.initObserver();
           }, 150);

@@ -49,6 +49,42 @@
         <i class="fas fa-arrow-left"></i>
         <span>From: <strong>{{ sourceContentMetadata.label }}</strong></span>
       </div>
+
+      <div
+        v-if="showTraktActions"
+        class="trakt-inline-actions trakt-poster-actions"
+        data-testid="trakt-poster-actions"
+        @click.stop>
+        <span
+          class="trakt-inline-state"
+          :class="{ watched: traktWatched }"
+          data-testid="trakt-poster-state">
+          <i class="icon-trakt"></i>
+          {{ traktLabel }}
+        </span>
+        <button
+          type="button"
+          class="trakt-inline-btn"
+          data-testid="trakt-poster-mark-watched"
+          :class="{ active: traktWatched }"
+          :disabled="traktBusy"
+          @click.stop="$emit('toggle-trakt-watched')">
+          <i :class="traktWatched ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+          {{ traktWatched ? 'Unwatch' : 'Watched' }}
+        </button>
+        <label class="trakt-inline-points" data-testid="trakt-poster-points">
+          <span>Points</span>
+          <select
+            :value="traktRatingPoints"
+            :disabled="traktBusy"
+            @change.stop="$emit('rate-trakt', $event.target.value)">
+            <option value="">None</option>
+            <option v-for="point in traktPointOptions" :key="point" :value="point">
+              {{ point }}
+            </option>
+          </select>
+        </label>
+      </div>
     </div>
   </div>
 </template>
@@ -88,8 +124,32 @@ export default {
       default: 'source',
       validator: value => ['source', 'ai'].includes(value),
     },
+    showTraktActions: {
+      type: Boolean,
+      default: false,
+    },
+    traktLabel: {
+      type: String,
+      default: 'Trakt',
+    },
+    traktWatched: {
+      type: Boolean,
+      default: false,
+    },
+    traktBusy: {
+      type: Boolean,
+      default: false,
+    },
+    traktRatingPoints: {
+      type: String,
+      default: '',
+    },
+    traktPointOptions: {
+      type: Array,
+      default: () => [],
+    },
   },
-  emits: ['select'],
+  emits: ['select', 'toggle-trakt-watched', 'rate-trakt'],
   computed: {
     showRating() {
       return this.showMissingRating || Boolean(this.item.rating);
@@ -115,6 +175,8 @@ export default {
   },
 };
 </script>
+
+<style src="@/assets/styles/traktRequestActions.css"></style>
 
 <style scoped>
 .request-card {
@@ -305,6 +367,10 @@ export default {
 
 .source-link strong {
   color: var(--color-primary);
+}
+
+.trakt-poster-actions {
+  margin-top: 0.15rem;
 }
 
 .request-card--compact .request-card-title {
