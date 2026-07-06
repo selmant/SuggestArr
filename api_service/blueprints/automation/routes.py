@@ -14,6 +14,12 @@ from api_service.services.trakt.request_actions import (
     set_request_rating,
     unmark_request_watched,
 )
+from api_service.services.seer.request_actions import (
+    approve_request as approve_seer_request,
+    decline_request as decline_seer_request,
+    get_request_seer_status,
+    get_request_seer_statuses_batch,
+)
 from api_service.utils.asyncio_loop import close_event_loop
 
 logger = LoggerManager().get_logger("AutomationRoute")
@@ -263,4 +269,86 @@ def rate_request_route(tmdb_id: str, media_type: str):
         return jsonify({"message": str(exc)}), 502
     except Exception as exc:
         logger.error("Error rating request on Trakt: %s", exc, exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/<tmdb_id>/<media_type>/seer/status', methods=['GET'])
+def get_request_seer_status_route(tmdb_id: str, media_type: str):
+    """Return Seer approval status for a request item."""
+    try:
+        media_type = _validate_media_type(media_type)
+        result = async_to_sync(get_request_seer_status)(
+            DatabaseManager(), tmdb_id, media_type,
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        return jsonify({"message": str(exc)}), 400
+    except RuntimeError as exc:
+        logger.warning("Seer status failed for %s/%s: %s", media_type, tmdb_id, exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error fetching Seer status: %s", exc, exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/seer/status-batch', methods=['POST'])
+def get_request_seer_statuses_batch_route():
+    """Return Seer approval status for many request items in one pass."""
+    try:
+        payload = _get_json()
+        items = payload.get("items")
+        if not isinstance(items, list):
+            return jsonify({"message": "items must be a list"}), 400
+        result = async_to_sync(get_request_seer_statuses_batch)(
+            DatabaseManager(),
+            items,
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        return jsonify({"message": str(exc)}), 400
+    except RuntimeError as exc:
+        logger.warning("Seer batch status failed: %s", exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error fetching Seer batch status: %s", exc, exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/<tmdb_id>/<media_type>/seer/approve', methods=['POST'])
+@require_role('admin')
+def approve_seer_request_route(tmdb_id: str, media_type: str):
+    """Approve pending Seer request(s) for a SuggestArr request item."""
+    try:
+        media_type = _validate_media_type(media_type)
+        result = async_to_sync(approve_seer_request)(
+            DatabaseManager(), tmdb_id, media_type,
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        return jsonify({"message": str(exc)}), 400
+    except RuntimeError as exc:
+        logger.warning("Seer approve failed for %s/%s: %s", media_type, tmdb_id, exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error approving Seer request: %s", exc, exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/<tmdb_id>/<media_type>/seer/decline', methods=['POST'])
+@require_role('admin')
+def decline_seer_request_route(tmdb_id: str, media_type: str):
+    """Decline pending Seer request(s) for a SuggestArr request item."""
+    try:
+        media_type = _validate_media_type(media_type)
+        result = async_to_sync(decline_seer_request)(
+            DatabaseManager(), tmdb_id, media_type,
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        return jsonify({"message": str(exc)}), 400
+    except RuntimeError as exc:
+        logger.warning("Seer decline failed for %s/%s: %s", media_type, tmdb_id, exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error declining Seer request: %s", exc, exc_info=True)
         return jsonify({"error": "An internal error occurred"}), 500

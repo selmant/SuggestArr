@@ -1,6 +1,6 @@
 <template>
   <div class="request-card" :class="{ 'request-card--compact': compact }" data-testid="request-poster-card" @click="$emit('select', item)">
-    <div class="request-card-poster">
+    <div class="request-card-poster" :class="posterDockClasses">
       <img
         v-if="item.poster_path"
         :src="item.poster_path"
@@ -31,6 +31,44 @@
           <i :class="requestMethodIcon"></i>
           {{ requestMethodLabel }}
         </span>
+      </div>
+
+      <div
+        v-if="showSeerActions"
+        class="seer-poster-dock"
+        :class="[
+          { 'seer-poster-dock--compact': compact },
+          seerStatus ? `seer-poster-dock--${seerStatus}` : '',
+        ]"
+        :style="seerDockStyle"
+        data-testid="seer-poster-actions"
+        @click.stop>
+        <div class="seer-poster-dock__status" data-testid="seer-poster-state">
+          <i class="fas fa-inbox"></i>
+          <span>{{ seerLabel }}</span>
+        </div>
+        <div v-if="seerCanAction" class="seer-poster-dock__controls">
+          <button
+            type="button"
+            class="seer-poster-dock__btn seer-poster-dock__btn--approve"
+            data-testid="seer-poster-approve"
+            :disabled="seerBusy"
+            title="Approve in Seer"
+            @click.stop="$emit('approve-seer')">
+            <i class="fas fa-check"></i>
+            <span class="seer-poster-dock__btn-text">Approve</span>
+          </button>
+          <button
+            type="button"
+            class="seer-poster-dock__btn seer-poster-dock__btn--decline"
+            data-testid="seer-poster-decline"
+            :disabled="seerBusy"
+            title="Decline in Seer"
+            @click.stop="$emit('decline-seer')">
+            <i class="fas fa-times"></i>
+            <span class="seer-poster-dock__btn-text">Decline</span>
+          </button>
+        </div>
       </div>
 
       <div
@@ -144,9 +182,41 @@ export default {
       type: String,
       default: '',
     },
+    showSeerActions: {
+      type: Boolean,
+      default: false,
+    },
+    seerLabel: {
+      type: String,
+      default: 'Seer',
+    },
+    seerStatus: {
+      type: String,
+      default: '',
+    },
+    seerBusy: {
+      type: Boolean,
+      default: false,
+    },
+    seerCanAction: {
+      type: Boolean,
+      default: false,
+    },
   },
-  emits: ['select', 'set-trakt-watched', 'rate-trakt'],
+  emits: ['select', 'set-trakt-watched', 'rate-trakt', 'approve-seer', 'decline-seer'],
   computed: {
+    posterDockClasses() {
+      return {
+        'request-card-poster--with-seer': this.showSeerActions,
+        'request-card-poster--with-trakt-and-seer': this.showSeerActions && this.showTraktActions,
+      };
+    },
+    seerDockStyle() {
+      if (this.showTraktActions) {
+        return { bottom: '3.35rem' };
+      }
+      return { bottom: '0' };
+    },
     showRating() {
       return this.showMissingRating || Boolean(this.item.rating);
     },
@@ -173,6 +243,7 @@ export default {
 </script>
 
 <style src="@/assets/styles/traktRequestActions.css"></style>
+<style src="@/assets/styles/seerRequestActions.css"></style>
 
 <style scoped>
 .request-card {

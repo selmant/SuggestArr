@@ -45,6 +45,46 @@
                 </div>
               </div>
 
+              <div v-if="seerModalTarget" class="seer-action-strip" data-testid="seer-action-strip">
+                <div class="seer-action-main">
+                  <span class="seer-action-label">
+                    <i class="fas fa-inbox"></i>
+                    Seer
+                  </span>
+                  <span v-if="seerStatusLoading" class="seer-action-state">Checking...</span>
+                  <span v-else-if="seerStatusError" class="seer-action-state seer-action-state--warn">
+                    {{ seerStatusError }}
+                  </span>
+                  <span
+                    v-else
+                    class="seer-status-badge"
+                    :class="seerStatus?.seer_status ? `seer-status-badge--${seerStatus.seer_status}` : ''">
+                    {{ getSeerInlineLabel(seerModalTarget) }}
+                  </span>
+                </div>
+
+                <div v-if="canActionSeer(seerModalTarget)" class="seer-action-controls">
+                  <button
+                    type="button"
+                    class="seer-action-btn seer-action-btn--approve"
+                    data-testid="seer-approve"
+                    :disabled="seerActionLoading || seerStatusLoading"
+                    @click="$emit('approve-seer')">
+                    <i class="fas fa-check"></i>
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    class="seer-action-btn seer-action-btn--decline"
+                    data-testid="seer-decline"
+                    :disabled="seerActionLoading || seerStatusLoading"
+                    @click="$emit('decline-seer')">
+                    <i class="fas fa-times"></i>
+                    Decline
+                  </button>
+                </div>
+              </div>
+
               <div v-if="traktModalTarget" class="trakt-action-strip" data-testid="trakt-action-strip">
                 <div class="trakt-action-main">
                   <span class="trakt-action-label">
@@ -151,6 +191,34 @@
                         <i class="fas fa-user"></i>
                         {{ request.user_name }}
                       </p>
+                      <div v-if="canShowRelatedSeer(request)" class="seer-inline-actions" data-testid="seer-inline-actions" @click.stop>
+                        <span
+                          class="seer-status-badge"
+                          :class="getSeerStatus(request)?.seer_status ? `seer-status-badge--${getSeerStatus(request).seer_status}` : ''">
+                          <i class="fas fa-inbox"></i>
+                          {{ getSeerInlineLabel(request) }}
+                        </span>
+                        <button
+                          v-if="canActionSeer(request)"
+                          type="button"
+                          class="seer-action-btn seer-action-btn--approve"
+                          data-testid="seer-inline-approve"
+                          :disabled="isSeerBusy(request)"
+                          @click.stop="$emit('approve-related-seer', request)">
+                          <i class="fas fa-check"></i>
+                          Approve
+                        </button>
+                        <button
+                          v-if="canActionSeer(request)"
+                          type="button"
+                          class="seer-action-btn seer-action-btn--decline"
+                          data-testid="seer-inline-decline"
+                          :disabled="isSeerBusy(request)"
+                          @click.stop="$emit('decline-related-seer', request)">
+                          <i class="fas fa-times"></i>
+                          Decline
+                        </button>
+                      </div>
                       <div v-if="canShowRelatedTrakt(request)" class="trakt-inline-actions" data-testid="trakt-inline-actions" @click.stop>
                         <span
                           class="trakt-inline-state"
@@ -258,6 +326,46 @@ export default {
       type: Function,
       default: () => false,
     },
+    seerModalTarget: {
+      type: Object,
+      default: null,
+    },
+    canShowRelatedSeer: {
+      type: Function,
+      default: () => false,
+    },
+    canActionSeer: {
+      type: Function,
+      default: () => false,
+    },
+    seerStatus: {
+      type: Object,
+      default: null,
+    },
+    seerStatusLoading: {
+      type: Boolean,
+      default: false,
+    },
+    seerActionLoading: {
+      type: Boolean,
+      default: false,
+    },
+    seerStatusError: {
+      type: String,
+      default: '',
+    },
+    getSeerStatus: {
+      type: Function,
+      default: () => null,
+    },
+    getSeerInlineLabel: {
+      type: Function,
+      default: () => 'Seer',
+    },
+    isSeerBusy: {
+      type: Function,
+      default: () => false,
+    },
   },
   emits: [
     'close',
@@ -267,6 +375,10 @@ export default {
     'rate-selected-on-trakt',
     'set-related-trakt-watched',
     'rate-related-on-trakt',
+    'approve-seer',
+    'decline-seer',
+    'approve-related-seer',
+    'decline-related-seer',
   ],
   computed: {
     posterDateLabel() {
@@ -311,6 +423,7 @@ export default {
 </script>
 
 <style src="@/assets/styles/traktRequestActions.css"></style>
+<style src="@/assets/styles/seerRequestActions.css"></style>
 
 <style scoped>
 .request-details-modal {

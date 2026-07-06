@@ -227,6 +227,60 @@ class SeerClient(BaseHTTPClient):
                     return True
         return False
 
+    async def get_requests_index(self) -> dict:
+        """Build a lookup of Seer requests keyed by (media_type, tmdb_id).
+
+        :return: Dict mapping ``(media_type, tmdb_id)`` tuples to lists of
+            request entries with ``id``, ``status``, and ``media_status``.
+        """
+        self.logger.debug("Building Seer requests index...")
+        index: dict = {}
+        total_requests = await self.get_total_request()
+        for skip in range(0, total_requests, BATCH_SIZE):
+            data = await self._make_request("GET", f"api/v1/request?take={BATCH_SIZE}&skip={skip}")
+            if not data:
+                continue
+            for request_data in data.get('results', []):
+                media = request_data.get('media') or {}
+                tmdb_id = media.get('tmdbId')
+                media_type = media.get('mediaType')
+                if tmdb_id is None or not media_type:
+                    continue
+                key = (str(media_type).lower(), str(tmdb_id))
+                entry = {
+                    'id': request_data.get('id'),
+                    'status': request_data.get('status'),
+                    'media_status': media.get('status'),
+                    'updated_at': request_data.get('updatedAt'),
+                }
+                index.setdefault(key, []).append(entry)
+        self.logger.debug("Seer requests index built with %d keys", len(index))
+        return index
+
+    async def approve_request(self, request_id: int) -> bool:
+        """Approve a Seer media request by its numeric request id.
+
+        :param request_id: Seer request id.
+        :return: True when the approve call succeeds.
+        """
+        self.logger.debug("Approving Seer request %s", request_id)
+        result = await self._make_request(
+            "POST", f"api/v1/request/{request_id}/approve", use_cookie=False,
+        )
+        return result is not None
+
+    async def decline_request(self, request_id: int) -> bool:
+        """Decline a Seer media request by its numeric request id.
+
+        :param request_id: Seer request id.
+        :return: True when the decline call succeeds.
+        """
+        self.logger.debug("Declining Seer request %s", request_id)
+        result = await self._make_request(
+            "POST", f"api/v1/request/{request_id}/decline", use_cookie=False,
+        )
+        return result is not None
+
     async def get_radarr_servers(self):
         """Fetch available Radarr servers from the Seer service with their profiles, root folders, and tags."""
         self.logger.debug("Fetching Radarr servers from the Seer service")

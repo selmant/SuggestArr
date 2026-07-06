@@ -138,6 +138,22 @@ export const rateRequestOnTrakt = (tmdbId, mediaType, userId, ratingStars) => {
     });
 };
 
+export const getRequestSeerStatus = (tmdbId, mediaType) => {
+    return axios.get(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/seer/status`);
+};
+
+export const getRequestSeerStatusesBatch = (items) => {
+    return axios.post('/api/automation/requests/seer/status-batch', { items });
+};
+
+export const approveSeerRequest = (tmdbId, mediaType) => {
+    return axios.post(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/seer/approve`);
+};
+
+export const declineSeerRequest = (tmdbId, mediaType) => {
+    return axios.post(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/seer/decline`);
+};
+
 // AI Search: request a specific TMDB item via Seer
 export const aiSearchRequest = (tmdbId, mediaType, rationale = '', metadata = {}, searchQuery = '') => {
     return axios.post('/api/ai-search/request', {

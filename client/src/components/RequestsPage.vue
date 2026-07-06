@@ -247,9 +247,11 @@
                 v-for="request in filteredAndSortedRequests" 
                 :key="request.request_id"
                 :item="request"
-                v-bind="posterTraktProps(request)"
+                v-bind="{ ...posterTraktProps(request), ...posterSeerProps(request) }"
                 @set-trakt-watched="setTraktWatchedFor(request, $event)"
                 @rate-trakt="rateRequestOnTraktFor(request, $event)"
+                @approve-seer="approveFor(request)"
+                @decline-seer="declineFor(request)"
                 @select="openModal" />
             </transition-group>
 
@@ -299,13 +301,27 @@
         :get-trakt-rating-stars="getTraktRatingStars"
         :get-trakt-inline-label="getTraktInlineLabel"
         :is-trakt-busy="isTraktBusy"
+        :seer-modal-target="getSeerModalTarget(selectedSource)"
+        :can-show-related-seer="canShowRelatedSeer"
+        :can-action-seer="canActionSeer"
+        :seer-status="seerStatus"
+        :seer-status-loading="seerStatusLoading"
+        :seer-action-loading="seerActionLoading"
+        :seer-status-error="seerStatusError"
+        :get-seer-status="getSeerStatus"
+        :get-seer-inline-label="getSeerInlineLabel"
+        :is-seer-busy="isSeerBusy"
         @close="closeModal"
         @select-related="openModal"
         @set-trakt-watched="setTraktWatchedForSource(selectedSource, $event)"
         @update:trakt-rating-stars="traktRatingStars = $event"
         @rate-selected-on-trakt="rateSelectedOnTraktForSource(selectedSource)"
         @set-related-trakt-watched="(item, watched) => setTraktWatchedFor(item, watched)"
-        @rate-related-on-trakt="(item, stars) => rateRequestOnTraktFor(item, stars)" />
+        @rate-related-on-trakt="(item, stars) => rateRequestOnTraktFor(item, stars)"
+        @approve-seer="approveForSource(selectedSource)"
+        @decline-seer="declineForSource(selectedSource)"
+        @approve-related-seer="approveFor"
+        @decline-related-seer="declineFor" />
     </div>
 </template>
 
@@ -314,6 +330,7 @@ import '@/assets/styles/requestsPage.css';
 import axios from "axios";
 import { useBackgroundImage } from '@/composables/useBackgroundImage';
 import { useRequestTraktActions } from '@/composables/useRequestTraktActions';
+import { useRequestSeerActions } from '@/composables/useRequestSeerActions';
 import Footer from './AppFooter.vue';
 import BaseDropdown from '@/components/common/BaseDropdown.vue';
 import RequestPosterCard from '@/components/common/RequestPosterCard.vue';
@@ -335,9 +352,13 @@ export default {
   setup() {
     const background = useBackgroundImage();
     const trakt = useRequestTraktActions();
+    const seer = useRequestSeerActions();
     return {
       ...background,
       ...trakt,
+      ...seer,
+      setTraktModalTargetResolver: trakt.setModalTargetResolver,
+      setSeerModalTargetResolver: seer.setModalTargetResolver,
     };
   },
   data() {
@@ -711,6 +732,7 @@ export default {
 
         this.$nextTick(() => {
           this.prefetchPosterTraktStatuses(this.allRequestsFlat);
+          this.prefetchPosterSeerStatuses(this.allRequestsFlat);
           setTimeout(() => {
             this.initObserver();
           }, 150);
@@ -736,13 +758,17 @@ export default {
     openModal(source, isAiRequest = false) {
       this.selectedSource = { ...source, _isAiRequest: isAiRequest };
       this.applyTraktStatus(null);
+      this.applySeerStatus(null);
       this.traktStatusError = '';
+      this.seerStatusError = '';
       this.showModal = true;
       document.body.style.overflow = 'hidden';
       this.$nextTick(() => {
         this.loadTraktStatusForSource(this.selectedSource);
+        this.loadSeerStatusForSource(this.selectedSource);
         if (this.selectedSource?.requests?.length) {
           this.prefetchPosterTraktStatuses(this.selectedSource.requests);
+          this.prefetchPosterSeerStatuses(this.selectedSource.requests);
         }
       });
     },
@@ -751,7 +777,9 @@ export default {
       this.showModal = false;
       this.selectedSource = null;
       this.applyTraktStatus(null);
+      this.applySeerStatus(null);
       this.traktStatusError = '';
+      this.seerStatusError = '';
       document.body.style.overflow = 'auto';
     },
   },
@@ -776,7 +804,8 @@ export default {
 
     setTimeout(async () => {
       await this.loadTraktDefaults();
-      this.setModalTargetResolver(() => this.getTraktModalTarget(this.selectedSource));
+      this.setTraktModalTargetResolver(() => this.getTraktModalTarget(this.selectedSource));
+      this.setSeerModalTargetResolver(() => this.getSeerModalTarget(this.selectedSource));
       this.fetchRequests();
 
       this.$nextTick(() => {
