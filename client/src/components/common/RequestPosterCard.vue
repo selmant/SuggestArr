@@ -14,7 +14,7 @@
       <div class="poster-overlay poster-overlay--top">
         <span class="poster-pill poster-pill--media">
           <i :class="item.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
-          {{ item.media_type.toUpperCase() }}
+          {{ compact ? item.media_type.charAt(0).toUpperCase() : item.media_type.toUpperCase() }}
         </span>
         <span v-if="showRating" class="poster-pill poster-pill--rating">
           <i class="fas fa-star"></i>
@@ -31,6 +31,38 @@
           <i :class="requestMethodIcon"></i>
           {{ requestMethodLabel }}
         </span>
+      </div>
+
+      <div
+        v-if="showTraktActions"
+        class="trakt-poster-dock"
+        :class="{ 'trakt-poster-dock--compact': compact, 'trakt-poster-dock--watched': traktWatched }"
+        data-testid="trakt-poster-actions"
+        @click.stop>
+        <div class="trakt-poster-dock__status" data-testid="trakt-poster-state">
+          <i class="icon-trakt"></i>
+          <span>{{ traktLabel }}</span>
+        </div>
+        <div class="trakt-poster-dock__controls">
+          <button
+            type="button"
+            class="trakt-poster-dock__btn trakt-poster-dock__btn--watch"
+            data-testid="trakt-poster-mark-watched"
+            :class="{ 'is-active': traktWatched }"
+            :disabled="traktBusy"
+            :title="traktWatched ? 'Mark unwatched on Trakt' : 'Mark watched on Trakt'"
+            @click.stop="$emit('set-trakt-watched', !traktWatched)">
+            <i :class="traktWatched ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+            <span class="trakt-poster-dock__btn-text">{{ traktWatched ? 'Unwatch' : 'Watch' }}</span>
+          </button>
+          <div class="trakt-poster-dock__rate" data-testid="trakt-poster-rating">
+            <TraktStarRating
+              :model-value="traktRatingStars"
+              :disabled="traktBusy"
+              :compact="compact"
+              @rate="$emit('rate-trakt', $event)" />
+          </div>
+        </div>
       </div>
     </div>
 
@@ -49,42 +81,6 @@
         <i class="fas fa-arrow-left"></i>
         <span>From: <strong>{{ sourceContentMetadata.label }}</strong></span>
       </div>
-
-      <div
-        v-if="showTraktActions"
-        class="trakt-inline-actions trakt-poster-actions"
-        data-testid="trakt-poster-actions"
-        @click.stop>
-        <span
-          class="trakt-inline-state"
-          :class="{ watched: traktWatched }"
-          data-testid="trakt-poster-state">
-          <i class="icon-trakt"></i>
-          {{ traktLabel }}
-        </span>
-        <button
-          type="button"
-          class="trakt-inline-btn"
-          data-testid="trakt-poster-mark-watched"
-          :class="{ active: traktWatched }"
-          :disabled="traktBusy"
-          @click.stop="$emit('toggle-trakt-watched')">
-          <i :class="traktWatched ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
-          {{ traktWatched ? 'Unwatch' : 'Watched' }}
-        </button>
-        <label class="trakt-inline-points" data-testid="trakt-poster-points">
-          <span>Points</span>
-          <select
-            :value="traktRatingPoints"
-            :disabled="traktBusy"
-            @change.stop="$emit('rate-trakt', $event.target.value)">
-            <option value="">None</option>
-            <option v-for="point in traktPointOptions" :key="point" :value="point">
-              {{ point }}
-            </option>
-          </select>
-        </label>
-      </div>
     </div>
   </div>
 </template>
@@ -95,9 +91,13 @@ import {
   getRequestMethodMetadata,
   getRequestSourceContentMetadata,
 } from '@/utils/requestSourceMetadata.js';
+import TraktStarRating from '@/components/common/TraktStarRating.vue';
 
 export default {
   name: 'RequestPosterCard',
+  components: {
+    TraktStarRating,
+  },
   props: {
     item: {
       type: Object,
@@ -140,16 +140,12 @@ export default {
       type: Boolean,
       default: false,
     },
-    traktRatingPoints: {
+    traktRatingStars: {
       type: String,
       default: '',
     },
-    traktPointOptions: {
-      type: Array,
-      default: () => [],
-    },
   },
-  emits: ['select', 'toggle-trakt-watched', 'rate-trakt'],
+  emits: ['select', 'set-trakt-watched', 'rate-trakt'],
   computed: {
     showRating() {
       return this.showMissingRating || Boolean(this.item.rating);
@@ -223,13 +219,15 @@ export default {
   inset: 0;
   background: linear-gradient(
     to bottom,
-    var(--color-bg-overlay-light),
-    transparent 30%,
-    transparent 56%,
-    var(--surface-overlay)
+    rgba(0, 0, 0, 0.55) 0%,
+    transparent 28%,
+    transparent 48%,
+    rgba(0, 0, 0, 0.35) 72%,
+    rgba(0, 0, 0, 0.92) 100%
   );
-  opacity: var(--alpha-80);
+  opacity: 1;
   pointer-events: none;
+  z-index: 1;
 }
 
 .poster-placeholder {
@@ -245,7 +243,7 @@ export default {
 
 .poster-overlay {
   position: absolute;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   pointer-events: none;
 }
@@ -259,13 +257,16 @@ export default {
 }
 
 .poster-overlay--bottom {
-  right: 0;
-  bottom: 0;
-  left: 0;
+  right: var(--spacing-sm);
+  left: var(--spacing-sm);
+  bottom: 4.25rem;
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: var(--spacing-xs);
-  padding: var(--spacing-3xl) var(--spacing-sm) var(--spacing-sm);
+}
+
+.request-card--compact .poster-overlay--bottom {
+  bottom: 3.35rem;
 }
 
 .poster-pill,
@@ -369,10 +370,6 @@ export default {
   color: var(--color-primary);
 }
 
-.trakt-poster-actions {
-  margin-top: 0.15rem;
-}
-
 .request-card--compact .request-card-title {
   font-size: var(--font-size-sm);
   line-height: 1.25;
@@ -384,15 +381,12 @@ export default {
   left: var(--spacing-xs);
 }
 
-.request-card--compact .poster-overlay--bottom {
-  padding: var(--spacing-2xl) var(--spacing-xs) var(--spacing-xs);
-}
-
 .request-card--compact .poster-pill,
 .request-card--compact .poster-date,
 .request-card--compact .poster-origin {
   gap: var(--spacing-2xs);
   padding: var(--spacing-2xs) var(--spacing-xs);
+  font-size: 0.62rem;
 }
 
 @media (max-width: 768px) {
@@ -413,10 +407,6 @@ export default {
     top: var(--spacing-xs);
     right: var(--spacing-xs);
     left: var(--spacing-xs);
-  }
-
-  .poster-overlay--bottom {
-    padding: var(--spacing-2xl) var(--spacing-xs) var(--spacing-xs);
   }
 }
 

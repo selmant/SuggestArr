@@ -201,21 +201,65 @@ class TraktClient(BaseHTTPClient):
 
     async def get_item_sync_status(self, media_type: str, tmdb_id: str) -> dict[str, Any]:
         tmdb_id = str(tmdb_id)
-        if media_type == "movie":
-            watched_payload = await self._request("GET", "/sync/watched/movies", authenticated=True)
-            ratings_payload = await self._request("GET", "/sync/ratings/movies", authenticated=True)
-            item_key = "movie"
-        elif media_type == "tv":
-            watched_payload = await self._request("GET", "/sync/watched/shows", authenticated=True)
-            ratings_payload = await self._request("GET", "/sync/ratings/shows", authenticated=True)
-            item_key = "show"
-        else:
+        if media_type not in ("movie", "tv"):
             raise ValueError(f"Unsupported media_type: {media_type}")
 
-        return {
-            "watched": self._payload_contains_tmdb(watched_payload, item_key, tmdb_id),
-            "rating": self._find_rating_for_tmdb(ratings_payload, item_key, tmdb_id),
-        }
+        _, trakt_id = await self._resolve_trakt_item(media_type, tmdb_id)
+        watched, rating = await asyncio.gather(
+            self._get_watched_by_trakt_id(media_type, trakt_id),
+            self._get_rating_by_trakt_id(media_type, trakt_id),
+        )
+        return {"watched": watched, "rating": rating}
+
+    async def _resolve_trakt_item(self, media_type: str, tmdb_id: str) -> tuple[str, str]:
+        search_type = "movie" if media_type == "movie" else "show"
+        payload = await self._request(
+            "GET",
+            f"/search/tmdb/{tmdb_id}",
+            params={"type": search_type},
+            authenticated=True,
+        )
+        for entry in payload or []:
+            item = (entry or {}).get(search_type) or {}
+            ids = item.get("ids") or {}
+            if str(ids.get("tmdb") or "") == str(tmdb_id) and ids.get("trakt") is not None:
+                return search_type, str(ids["trakt"])
+        raise ValueError(f"TMDb {media_type} {tmdb_id} not found on Trakt")
+
+    async def _get_watched_by_trakt_id(self, media_type: str, trakt_id: str) -> bool:
+        path = f"/movies/{trakt_id}/watched" if media_type == "movie" else f"/shows/{trakt_id}/watched"
+        payload = await self._request_optional("GET", path, authenticated=True)
+        return payload is not None
+
+    async def _get_rating_by_trakt_id(self, media_type: str, trakt_id: str) -> Optional[int]:
+        path = f"/movies/{trakt_id}/rating" if media_type == "movie" else f"/shows/{trakt_id}/rating"
+        payload = await self._request_optional("GET", path, authenticated=True)
+        if not payload:
+            return None
+        rating = payload.get("rating")
+        return int(rating) if rating is not None else None
+
+    async def _request_optional(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Optional[dict[str, Any]] = None,
+        json: Optional[dict[str, Any]] = None,
+        authenticated: bool = True,
+    ) -> Any:
+        try:
+            return await self._request(
+                method,
+                path,
+                params=params,
+                json=json,
+                authenticated=authenticated,
+            )
+        except RuntimeError as exc:
+            if " returned 404" in str(exc):
+                return None
+            raise
 
     async def get_recommendations(
         self,

@@ -6,6 +6,11 @@ from typing import Any, Optional
 from api_service.config.config import load_env_vars
 from api_service.db.database_manager import DatabaseManager
 from api_service.services.trakt.media_user_augmentor import TraktAccountResolver
+from api_service.services.trakt.sync_cache import (
+    get_cached_item_status,
+    get_cached_item_statuses,
+    invalidate_user_sync_cache,
+)
 from api_service.services.trakt.trakt_client import TraktClient
 
 _VALID_MEDIA_TYPES = {"movie", "tv"}
@@ -70,14 +75,17 @@ def _status_payload(
     status: dict[str, Any],
 ) -> dict[str, Any]:
     rating = status.get("rating")
-    return {
+    payload = {
         "tmdb_id": str(tmdb_id),
         "media_type": media_type,
         "user_id": str(user_id),
-        "watched": bool(status.get("watched")),
-        "rating": rating,
-        "rating_stars": (float(rating) / 2) if rating is not None else None,
     }
+    if "watched" in status:
+        payload["watched"] = bool(status["watched"])
+    if "rating" in status:
+        payload["rating"] = rating
+        payload["rating_stars"] = (float(rating) / 2) if rating is not None else None
+    return payload
 
 
 def _create_client(db: DatabaseManager, user_id: str) -> TraktClient:
@@ -104,8 +112,50 @@ async def get_request_trakt_status(
 ) -> dict[str, Any]:
     media_type = _normalize_media_type(media_type)
     async with _create_client(db, user_id) as client:
-        status = await client.get_item_sync_status(media_type, str(tmdb_id))
-    return _status_payload(tmdb_id, media_type, user_id, status)
+        status = await get_cached_item_status(client, user_id, media_type, str(tmdb_id))
+    return _status_payload(
+        tmdb_id,
+        media_type,
+        user_id,
+        {
+            "watched": status.get("watched"),
+            "rating": status.get("rating"),
+        },
+    )
+
+
+async def get_request_trakt_statuses_batch(
+    db: DatabaseManager,
+    user_id: str,
+    items: list[dict[str, str]],
+) -> dict[str, Any]:
+    if not user_id:
+        raise ValueError("user_id is required")
+    if not items:
+        return {"user_id": str(user_id), "statuses": []}
+
+    normalized_items = []
+    for item in items:
+        media_type = _normalize_media_type(str(item.get("media_type") or ""))
+        tmdb_id = str(item.get("tmdb_id") or item.get("request_id") or "")
+        if not tmdb_id:
+            raise ValueError("each item requires tmdb_id or request_id")
+        normalized_items.append({"media_type": media_type, "tmdb_id": tmdb_id})
+
+    async with _create_client(db, user_id) as client:
+        statuses = await get_cached_item_statuses(client, user_id, normalized_items)
+    return {"user_id": str(user_id), "statuses": statuses}
+
+
+async def fresh_item_status(
+    client: TraktClient,
+    user_id: str,
+    media_type: str,
+    tmdb_id: str,
+) -> dict[str, Any]:
+    """Bypass cached sync lists and resolve the current Trakt state for one item."""
+    invalidate_user_sync_cache(user_id)
+    return await get_cached_item_status(client, user_id, media_type, str(tmdb_id))
 
 
 async def mark_request_watched(
@@ -119,14 +169,24 @@ async def mark_request_watched(
     media_type = _normalize_media_type(media_type)
     rating = _rating_stars_to_trakt(rating_stars)
     async with _create_client(db, user_id) as client:
-        await client.add_to_history(media_type, str(tmdb_id), _watched_at_value(watched_at))
+        current = await fresh_item_status(client, user_id, media_type, str(tmdb_id))
+        if not current.get("watched"):
+            await client.add_to_history(media_type, str(tmdb_id), _watched_at_value(watched_at))
         if rating is not None:
             await client.add_rating(media_type, str(tmdb_id), rating)
-        status = await client.get_item_sync_status(media_type, str(tmdb_id))
-        if status.get("rating") is None and rating is not None:
-            status["rating"] = rating
-        status["watched"] = True
-    return _status_payload(tmdb_id, media_type, user_id, status)
+        final = await fresh_item_status(client, user_id, media_type, str(tmdb_id))
+        if rating is not None and final.get("rating") is None:
+            final["rating"] = rating
+        final["watched"] = True
+    return _status_payload(
+        tmdb_id,
+        media_type,
+        user_id,
+        {
+            "watched": final.get("watched"),
+            "rating": final.get("rating"),
+        },
+    )
 
 
 async def set_request_rating(
@@ -142,9 +202,18 @@ async def set_request_rating(
         raise ValueError("rating_stars is required")
     async with _create_client(db, user_id) as client:
         await client.add_rating(media_type, str(tmdb_id), rating)
-        status = await client.get_item_sync_status(media_type, str(tmdb_id))
-        status["rating"] = rating
-    return _status_payload(tmdb_id, media_type, user_id, status)
+        final = await fresh_item_status(client, user_id, media_type, str(tmdb_id))
+        if final.get("rating") is None:
+            final["rating"] = rating
+    return _status_payload(
+        tmdb_id,
+        media_type,
+        user_id,
+        {
+            "watched": final.get("watched"),
+            "rating": final.get("rating"),
+        },
+    )
 
 
 async def unmark_request_watched(
@@ -156,11 +225,21 @@ async def unmark_request_watched(
 ) -> dict[str, Any]:
     media_type = _normalize_media_type(media_type)
     async with _create_client(db, user_id) as client:
-        await client.remove_from_history(media_type, str(tmdb_id))
-        if remove_rating:
+        current = await fresh_item_status(client, user_id, media_type, str(tmdb_id))
+        if current.get("watched"):
+            await client.remove_from_history(media_type, str(tmdb_id))
+        if remove_rating and current.get("rating") is not None:
             await client.remove_rating(media_type, str(tmdb_id))
-        status = await client.get_item_sync_status(media_type, str(tmdb_id))
-        status["watched"] = False
+        final = await fresh_item_status(client, user_id, media_type, str(tmdb_id))
         if remove_rating:
-            status["rating"] = None
-    return _status_payload(tmdb_id, media_type, user_id, status)
+            final["rating"] = None
+        final["watched"] = False
+    return _status_payload(
+        tmdb_id,
+        media_type,
+        user_id,
+        {
+            "watched": final.get("watched"),
+            "rating": final.get("rating"),
+        },
+    )

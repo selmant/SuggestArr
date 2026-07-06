@@ -28,11 +28,12 @@ class FakeTraktClient:
         self.db = db
         self.link_id = link_id
         self.token_source = token_source
+        self.watched = False
+        self.rating = None
         self.add_to_history = AsyncMock(return_value={"added": {"movies": 1}})
         self.remove_from_history = AsyncMock(return_value={"deleted": {"movies": 1}})
         self.add_rating = AsyncMock(return_value={"added": {"movies": 1}})
         self.remove_rating = AsyncMock(return_value={"deleted": {"movies": 1}})
-        self.get_item_sync_status = AsyncMock(return_value={"watched": False, "rating": None})
         FakeTraktClient.instances.append(self)
 
     async def __aenter__(self):
@@ -70,11 +71,16 @@ async def test_mark_request_watched_resolves_request_user_and_posts_history():
     FakeTraktClient.instances = []
 
     with patch.object(request_actions, "TraktClient", FakeTraktClient), \
+            patch.object(request_actions, "fresh_item_status", new_callable=AsyncMock) as fresh_status, \
             patch.object(request_actions, "load_env_vars", return_value={
                 "SELECTED_SERVICE": "jellyfin",
                 "TRAKT_CLIENT_ID": "cid",
                 "TRAKT_CLIENT_SECRET": "secret",
             }):
+        fresh_status.side_effect = [
+            {"watched": False, "rating": None},
+            {"watched": True, "rating": 9},
+        ]
         result = await request_actions.mark_request_watched(
             db, "550", "movie", "jf-1", watched_at="now", rating_stars=4.5,
         )
@@ -86,6 +92,61 @@ async def test_mark_request_watched_resolves_request_user_and_posts_history():
     client.add_to_history.assert_awaited_once()
     assert client.add_to_history.await_args.args[0:2] == ("movie", "550")
     client.add_rating.assert_awaited_once_with("movie", "550", 9)
+
+
+@pytest.mark.asyncio
+async def test_mark_request_watched_is_idempotent_when_already_watched():
+    db = linked_db()
+    FakeTraktClient.instances = []
+
+    with patch.object(request_actions, "TraktClient", FakeTraktClient), \
+            patch.object(request_actions, "fresh_item_status", new_callable=AsyncMock) as fresh_status, \
+            patch.object(request_actions, "load_env_vars", return_value={
+                "SELECTED_SERVICE": "jellyfin",
+                "TRAKT_CLIENT_ID": "cid",
+                "TRAKT_CLIENT_SECRET": "secret",
+            }):
+        fresh_status.side_effect = [
+            {"watched": True, "rating": 8},
+            {"watched": True, "rating": 8},
+        ]
+        result = await request_actions.mark_request_watched(db, "550", "movie", "jf-1")
+
+    assert result == {
+        "tmdb_id": "550",
+        "media_type": "movie",
+        "user_id": "jf-1",
+        "watched": True,
+        "rating": 8,
+        "rating_stars": 4.0,
+    }
+    client = FakeTraktClient.instances[0]
+    client.add_to_history.assert_not_awaited()
+    client.add_rating.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unmark_request_watched_is_idempotent_when_already_unwatched():
+    db = linked_db()
+    FakeTraktClient.instances = []
+
+    with patch.object(request_actions, "TraktClient", FakeTraktClient), \
+            patch.object(request_actions, "fresh_item_status", new_callable=AsyncMock) as fresh_status, \
+            patch.object(request_actions, "load_env_vars", return_value={
+                "SELECTED_SERVICE": "jellyfin",
+                "TRAKT_CLIENT_ID": "cid",
+                "TRAKT_CLIENT_SECRET": "secret",
+            }):
+        fresh_status.side_effect = [
+            {"watched": False, "rating": 6},
+            {"watched": False, "rating": 6},
+        ]
+        result = await request_actions.unmark_request_watched(db, "550", "movie", "jf-1")
+
+    assert result["watched"] is False
+    assert result["rating"] == 6
+    client = FakeTraktClient.instances[0]
+    client.remove_from_history.assert_not_awaited()
 
 
 @pytest.mark.asyncio

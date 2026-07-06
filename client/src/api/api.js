@@ -109,10 +109,17 @@ export const getRequestTraktStatus = (tmdbId, mediaType, userId) => {
     });
 };
 
-export const markRequestWatched = (tmdbId, mediaType, userId, ratingPoints = null) => {
+export const getRequestTraktStatusesBatch = (userId, items) => {
+    return axios.post('/api/automation/requests/trakt/status-batch', {
+        user_id: userId,
+        items,
+    });
+};
+
+export const markRequestWatched = (tmdbId, mediaType, userId, ratingStars = null) => {
     const payload = { user_id: userId, watched_at: 'now' };
-    if (ratingPoints !== null && ratingPoints !== '') {
-        payload.rating_stars = Number(ratingPoints) / 2;
+    if (ratingStars !== null && ratingStars !== '') {
+        payload.rating_stars = Number(ratingStars);
     }
     return axios.post(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/trakt/mark-watched`, payload);
 };
@@ -124,10 +131,10 @@ export const unmarkRequestWatched = (tmdbId, mediaType, userId, removeRating = f
     });
 };
 
-export const rateRequestOnTrakt = (tmdbId, mediaType, userId, ratingPoints) => {
+export const rateRequestOnTrakt = (tmdbId, mediaType, userId, ratingStars) => {
     return axios.post(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/trakt/rate`, {
         user_id: userId,
-        rating_stars: Number(ratingPoints) / 2,
+        rating_stars: Number(ratingStars),
     });
 };
 

@@ -247,14 +247,9 @@
                 v-for="request in filteredAndSortedRequests" 
                 :key="request.request_id"
                 :item="request"
-                :show-trakt-actions="canShowRelatedTrakt(request)"
-                :trakt-label="getTraktInlineLabel(request)"
-                :trakt-watched="Boolean(getTraktStatus(request)?.watched)"
-                :trakt-busy="isTraktBusy(request)"
-                :trakt-rating-points="getTraktRatingPoints(request)"
-                :trakt-point-options="traktPointOptions"
-                @toggle-trakt-watched="toggleTraktWatchedFor(request)"
-                @rate-trakt="rateRequestOnTraktFromPoster(request, $event)"
+                v-bind="posterTraktProps(request)"
+                @set-trakt-watched="setTraktWatchedFor(request, $event)"
+                @rate-trakt="rateRequestOnTraktFor(request, $event)"
                 @select="openModal" />
             </transition-group>
 
@@ -299,19 +294,18 @@
         :trakt-status-loading="traktStatusLoading"
         :trakt-action-loading="traktActionLoading"
         :trakt-status-error="traktStatusError"
-        :trakt-rating-points="traktRatingPoints"
-        :trakt-point-options="traktPointOptions"
+        :trakt-rating-stars="traktRatingStars"
         :get-trakt-status="getTraktStatus"
-        :get-trakt-rating-points="getTraktRatingPoints"
+        :get-trakt-rating-stars="getTraktRatingStars"
         :get-trakt-inline-label="getTraktInlineLabel"
         :is-trakt-busy="isTraktBusy"
         @close="closeModal"
         @select-related="openModal"
-        @toggle-trakt-watched="toggleTraktWatched"
-        @update:trakt-rating-points="traktRatingPoints = $event"
-        @rate-selected-on-trakt="rateSelectedOnTrakt"
-        @toggle-related-trakt-watched="toggleTraktWatchedFor"
-        @rate-related-on-trakt="rateRequestOnTraktFromModal" />
+        @set-trakt-watched="setTraktWatchedForSource(selectedSource, $event)"
+        @update:trakt-rating-stars="traktRatingStars = $event"
+        @rate-selected-on-trakt="rateSelectedOnTraktForSource(selectedSource)"
+        @set-related-trakt-watched="(item, watched) => setTraktWatchedFor(item, watched)"
+        @rate-related-on-trakt="(item, stars) => rateRequestOnTraktFor(item, stars)" />
     </div>
 </template>
 
@@ -319,6 +313,7 @@
 import '@/assets/styles/requestsPage.css';
 import axios from "axios";
 import { useBackgroundImage } from '@/composables/useBackgroundImage';
+import { useRequestTraktActions } from '@/composables/useRequestTraktActions';
 import Footer from './AppFooter.vue';
 import BaseDropdown from '@/components/common/BaseDropdown.vue';
 import RequestPosterCard from '@/components/common/RequestPosterCard.vue';
@@ -327,11 +322,6 @@ import { formatDate } from '@/utils/dateUtils.js';
 import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
 import {
   getAiSearchRequests,
-  getRequestTraktStatus,
-  listTraktMediaUsers,
-  markRequestWatched,
-  rateRequestOnTrakt,
-  unmarkRequestWatched,
 } from '@/api/api.js';
 
 export default {
@@ -343,15 +333,11 @@ export default {
     RequestDetailsModal,
   },
   setup() {
-    const { bg1Url, bg2Url, activeBg, isTransitioning, startDefaultImageRotation, startBackgroundImageRotation, stopBackgroundImageRotation } = useBackgroundImage();
+    const background = useBackgroundImage();
+    const trakt = useRequestTraktActions();
     return {
-      bg1Url,
-      bg2Url,
-      activeBg,
-      isTransitioning,
-      startDefaultImageRotation,
-      startBackgroundImageRotation,
-      stopBackgroundImageRotation,
+      ...background,
+      ...trakt,
     };
   },
   data() {
@@ -379,18 +365,6 @@ export default {
       aiRequestsPage: 1,
       aiRequestsTotalPages: 1,
       aiObserver: null,
-      traktStatus: null,
-      traktStatusLoading: false,
-      traktActionLoading: false,
-      traktStatusError: '',
-      traktRatingPoints: '',
-      traktPointOptions: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-      traktStatusByRequest: {},
-      traktRatingPointsByRequest: {},
-      traktStatusLoadingByRequest: {},
-      traktActionLoadingByRequest: {},
-      traktStatusErrorByRequest: {},
-      defaultTraktUserId: '',
       sortOptions: [
         { value: 'date-desc', label: 'Date (Newest)' },
         { value: 'date-asc', label: 'Date (Oldest)' },
@@ -547,276 +521,6 @@ export default {
     sourceHasMixedMediaTypes(source) {
       const types = new Set((source?.requests || []).map((request) => request.media_type));
       return types.size > 1;
-    },
-
-    canManageTrakt(item) {
-      return Boolean(
-        item &&
-        item.request_id &&
-        item.media_type &&
-        !item.requests &&
-        this.resolveTraktUserId(item),
-      );
-    },
-
-    canShowRelatedTrakt(item) {
-      return Boolean(
-        item?.request_id &&
-        item?.media_type &&
-        this.resolveTraktUserId(item),
-      );
-    },
-
-    resolveTraktUserId(item) {
-      const explicit = item?.user_id;
-      if (explicit) {
-        return String(explicit);
-      }
-      return this.defaultTraktUserId || '';
-    },
-
-    getTraktModalTarget(source) {
-      if (!source) {
-        return null;
-      }
-
-      if (!source.requests && this.canManageTrakt(source)) {
-        return source;
-      }
-
-      if (Array.isArray(source.requests) && source.requests.length === 1) {
-        const request = source.requests[0];
-        if (this.canShowRelatedTrakt(request)) {
-          return request;
-        }
-      }
-
-      return null;
-    },
-
-    async loadTraktDefaults() {
-      try {
-        const response = await listTraktMediaUsers();
-        const connected = (response.data?.media_users || []).filter((user) => user.trakt?.connected);
-        if (connected.length === 1) {
-          this.defaultTraktUserId = String(connected[0].external_user_id || '');
-        }
-      } catch (error) {
-        console.warn('Could not load Trakt media users for request actions:', error);
-      }
-    },
-
-    traktRequestKey(item) {
-      return item?.request_id ? String(item.request_id) : '';
-    },
-
-    applyTraktStatus(status) {
-      this.traktStatus = status || null;
-      const rating = status?.rating;
-      this.traktRatingPoints = rating ? String(rating) : '';
-    },
-
-    applyTraktStatusFor(item, status) {
-      const key = this.traktRequestKey(item);
-      if (!key) return;
-
-      this.traktStatusByRequest = {
-        ...this.traktStatusByRequest,
-        [key]: status || null,
-      };
-      this.traktRatingPointsByRequest = {
-        ...this.traktRatingPointsByRequest,
-        [key]: status?.rating ? String(status.rating) : '',
-      };
-
-      if (this.getTraktModalTarget(this.selectedSource)?.request_id === item.request_id) {
-        this.applyTraktStatus(status);
-      }
-    },
-
-    getTraktStatus(item) {
-      return this.traktStatusByRequest[this.traktRequestKey(item)] || null;
-    },
-
-    getTraktRatingPoints(item) {
-      return this.traktRatingPointsByRequest[this.traktRequestKey(item)] || '';
-    },
-
-    getTraktInlineLabel(item) {
-      const key = this.traktRequestKey(item);
-      if (this.traktStatusLoadingByRequest[key]) return 'Checking';
-      if (this.traktStatusErrorByRequest[key]) return this.traktStatusErrorByRequest[key];
-
-      const status = this.getTraktStatus(item);
-      if (!status) return 'Trakt';
-      return status.rating
-        ? `${status.watched ? 'Watched' : 'Unwatched'} - ${status.rating}/10`
-        : (status.watched ? 'Watched' : 'Unwatched');
-    },
-
-    isTraktBusy(item) {
-      const key = this.traktRequestKey(item);
-      return Boolean(this.traktStatusLoadingByRequest[key] || this.traktActionLoadingByRequest[key]);
-    },
-
-    async loadTraktStatusFor(item) {
-      if (!this.canShowRelatedTrakt(item)) return;
-
-      const key = this.traktRequestKey(item);
-      const userId = this.resolveTraktUserId(item);
-      this.traktStatusLoadingByRequest = { ...this.traktStatusLoadingByRequest, [key]: true };
-      this.traktStatusErrorByRequest = { ...this.traktStatusErrorByRequest, [key]: '' };
-      try {
-        const response = await getRequestTraktStatus(
-          item.request_id,
-          item.media_type,
-          userId,
-        );
-        this.applyTraktStatusFor(item, response.data);
-      } catch (error) {
-        this.applyTraktStatusFor(item, null);
-        this.traktStatusErrorByRequest = {
-          ...this.traktStatusErrorByRequest,
-          [key]: error.response?.data?.message || 'Unavailable',
-        };
-      } finally {
-        this.traktStatusLoadingByRequest = { ...this.traktStatusLoadingByRequest, [key]: false };
-      }
-    },
-
-    async loadTraktStatus() {
-      const target = this.getTraktModalTarget(this.selectedSource);
-      if (!target) {
-        this.applyTraktStatus(null);
-        return;
-      }
-
-      this.traktStatusLoading = true;
-      this.traktStatusError = '';
-      try {
-        const response = await getRequestTraktStatus(
-          target.request_id,
-          target.media_type,
-          this.resolveTraktUserId(target),
-        );
-        this.applyTraktStatus(response.data);
-        this.applyTraktStatusFor(target, response.data);
-      } catch (error) {
-        this.applyTraktStatus(null);
-        this.traktStatusError = error.response?.data?.message || 'Trakt unavailable';
-      } finally {
-        this.traktStatusLoading = false;
-      }
-    },
-
-    async toggleTraktWatched() {
-      const target = this.getTraktModalTarget(this.selectedSource);
-      if (!target || this.traktActionLoading) return;
-
-      const userId = this.resolveTraktUserId(target);
-      this.traktActionLoading = true;
-      this.traktStatusError = '';
-      try {
-        const response = this.traktStatus?.watched
-          ? await unmarkRequestWatched(
-              target.request_id,
-              target.media_type,
-              userId,
-            )
-          : await markRequestWatched(
-              target.request_id,
-              target.media_type,
-              userId,
-              this.traktRatingPoints || null,
-            );
-        this.applyTraktStatus(response.data);
-        this.applyTraktStatusFor(target, response.data);
-      } catch (error) {
-        this.traktStatusError = error.response?.data?.message || 'Could not update Trakt';
-      } finally {
-        this.traktActionLoading = false;
-      }
-    },
-
-    async rateSelectedOnTrakt() {
-      const target = this.getTraktModalTarget(this.selectedSource);
-      if (!target || !this.traktRatingPoints || this.traktActionLoading) {
-        return;
-      }
-
-      const userId = this.resolveTraktUserId(target);
-      this.traktActionLoading = true;
-      this.traktStatusError = '';
-      try {
-        const response = await rateRequestOnTrakt(
-          target.request_id,
-          target.media_type,
-          userId,
-          this.traktRatingPoints,
-        );
-        this.applyTraktStatus(response.data);
-        this.applyTraktStatusFor(target, response.data);
-      } catch (error) {
-        this.traktStatusError = error.response?.data?.message || 'Could not rate on Trakt';
-      } finally {
-        this.traktActionLoading = false;
-      }
-    },
-
-    async toggleTraktWatchedFor(item) {
-      if (!this.canShowRelatedTrakt(item) || this.isTraktBusy(item)) return;
-
-      const key = this.traktRequestKey(item);
-      const status = this.getTraktStatus(item);
-      const rating = this.getTraktRatingPoints(item);
-      const userId = this.resolveTraktUserId(item);
-      this.traktActionLoadingByRequest = { ...this.traktActionLoadingByRequest, [key]: true };
-      this.traktStatusErrorByRequest = { ...this.traktStatusErrorByRequest, [key]: '' };
-      try {
-        const response = status?.watched
-          ? await unmarkRequestWatched(item.request_id, item.media_type, userId)
-          : await markRequestWatched(item.request_id, item.media_type, userId, rating || null);
-        this.applyTraktStatusFor(item, response.data);
-      } catch (error) {
-        this.traktStatusErrorByRequest = {
-          ...this.traktStatusErrorByRequest,
-          [key]: error.response?.data?.message || 'Could not update',
-        };
-      } finally {
-        this.traktActionLoadingByRequest = { ...this.traktActionLoadingByRequest, [key]: false };
-      }
-    },
-
-    async rateRequestOnTraktFromPoster(item, points) {
-      await this.rateRequestOnTraktFromModal(item, { target: { value: points } });
-    },
-
-    prefetchPosterTraktStatuses() {
-      this.allRequestsFlat
-        .filter((request) => this.canShowRelatedTrakt(request))
-        .forEach((request) => this.loadTraktStatusFor(request));
-    },
-
-    async rateRequestOnTraktFromModal(item, event) {
-      const points = event.target.value;
-      const key = this.traktRequestKey(item);
-      this.traktRatingPointsByRequest = { ...this.traktRatingPointsByRequest, [key]: points };
-      if (!this.canShowRelatedTrakt(item) || !points || this.isTraktBusy(item)) return;
-
-      const userId = this.resolveTraktUserId(item);
-      this.traktActionLoadingByRequest = { ...this.traktActionLoadingByRequest, [key]: true };
-      this.traktStatusErrorByRequest = { ...this.traktStatusErrorByRequest, [key]: '' };
-      try {
-        const response = await rateRequestOnTrakt(item.request_id, item.media_type, userId, points);
-        this.applyTraktStatusFor(item, response.data);
-      } catch (error) {
-        this.traktStatusErrorByRequest = {
-          ...this.traktStatusErrorByRequest,
-          [key]: error.response?.data?.message || 'Could not rate',
-        };
-      } finally {
-        this.traktActionLoadingByRequest = { ...this.traktActionLoadingByRequest, [key]: false };
-      }
     },
 
     resetAndReload() {
@@ -1006,7 +710,7 @@ export default {
         this.currentPage = page;
 
         this.$nextTick(() => {
-          this.prefetchPosterTraktStatuses();
+          this.prefetchPosterTraktStatuses(this.allRequestsFlat);
           setTimeout(() => {
             this.initObserver();
           }, 150);
@@ -1036,11 +740,9 @@ export default {
       this.showModal = true;
       document.body.style.overflow = 'hidden';
       this.$nextTick(() => {
-        this.loadTraktStatus();
+        this.loadTraktStatusForSource(this.selectedSource);
         if (this.selectedSource?.requests?.length) {
-          this.selectedSource.requests
-            .filter((request) => this.canShowRelatedTrakt(request))
-            .forEach((request) => this.loadTraktStatusFor(request));
+          this.prefetchPosterTraktStatuses(this.selectedSource.requests);
         }
       });
     },
@@ -1074,6 +776,7 @@ export default {
 
     setTimeout(async () => {
       await this.loadTraktDefaults();
+      this.setModalTargetResolver(() => this.getTraktModalTarget(this.selectedSource));
       this.fetchRequests();
 
       this.$nextTick(() => {

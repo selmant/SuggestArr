@@ -57,7 +57,8 @@
                   </span>
                   <span v-else class="trakt-action-state">
                     {{ traktStatus?.watched ? 'Watched' : 'Unwatched' }}
-                    <template v-if="traktStatus?.rating">- {{ traktStatus.rating }}/10</template>
+                    <template v-if="traktStatus?.rating_stars">- {{ traktStatus.rating_stars }}★</template>
+                    <template v-else-if="traktStatus?.rating">- {{ traktStatus.rating / 2 }}★</template>
                   </span>
                 </div>
 
@@ -68,22 +69,17 @@
                     data-testid="trakt-mark-watched"
                     :class="{ active: traktStatus?.watched }"
                     :disabled="traktActionLoading || traktStatusLoading"
-                    @click="$emit('toggle-trakt-watched')">
+                    @click="$emit('set-trakt-watched', !traktStatus?.watched)">
                     <i :class="traktStatus?.watched ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
                     {{ traktStatus?.watched ? 'Mark unwatched' : 'Mark watched' }}
                   </button>
-                  <label class="trakt-points-select" data-testid="trakt-points-select">
-                    <span>Points</span>
-                    <select
-                      :value="traktRatingPoints"
+                  <div class="trakt-action-rating" data-testid="trakt-star-rating-wrap">
+                    <TraktStarRating
+                      :model-value="traktRatingStars"
                       :disabled="traktActionLoading || traktStatusLoading"
-                      @change="updateSelectedTraktRating">
-                      <option value="">None</option>
-                      <option v-for="point in traktPointOptions" :key="point" :value="point">
-                        {{ point }}/10
-                      </option>
-                    </select>
-                  </label>
+                      show-value
+                      @rate="onSelectedRatingUpdate" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -168,22 +164,17 @@
                           data-testid="trakt-inline-mark-watched"
                           :class="{ active: getTraktStatus(request)?.watched }"
                           :disabled="isTraktBusy(request)"
-                          @click.stop="$emit('toggle-related-trakt-watched', request)">
+                          @click.stop="$emit('set-related-trakt-watched', request, !getTraktStatus(request)?.watched)">
                           <i :class="getTraktStatus(request)?.watched ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
                           {{ getTraktStatus(request)?.watched ? 'Unwatch' : 'Watched' }}
                         </button>
-                        <label class="trakt-inline-points">
-                          <span>Points</span>
-                          <select
-                            :value="getTraktRatingPoints(request)"
+                        <div class="trakt-inline-rating" data-testid="trakt-inline-rating">
+                          <TraktStarRating
+                            :model-value="getTraktRatingStars(request)"
                             :disabled="isTraktBusy(request)"
-                            @change.stop="$emit('rate-related-on-trakt', request, $event)">
-                            <option value="">None</option>
-                            <option v-for="point in traktPointOptions" :key="point" :value="point">
-                              {{ point }}
-                            </option>
-                          </select>
-                        </label>
+                            compact
+                            @rate="$emit('rate-related-on-trakt', request, $event)" />
+                        </div>
                       </div>
                     </div>
                     <button class="request-details-modal__request-btn">
@@ -207,9 +198,13 @@ import {
   getRequestMethodMetadata,
   getRequestSourceContentMetadata,
 } from '@/utils/requestSourceMetadata.js';
+import TraktStarRating from '@/components/common/TraktStarRating.vue';
 
 export default {
   name: 'RequestDetailsModal',
+  components: {
+    TraktStarRating,
+  },
   props: {
     show: {
       type: Boolean,
@@ -243,19 +238,15 @@ export default {
       type: String,
       default: '',
     },
-    traktRatingPoints: {
+    traktRatingStars: {
       type: String,
       default: '',
-    },
-    traktPointOptions: {
-      type: Array,
-      default: () => [],
     },
     getTraktStatus: {
       type: Function,
       default: () => null,
     },
-    getTraktRatingPoints: {
+    getTraktRatingStars: {
       type: Function,
       default: () => '',
     },
@@ -271,10 +262,10 @@ export default {
   emits: [
     'close',
     'select-related',
-    'toggle-trakt-watched',
-    'update:trakt-rating-points',
+    'set-trakt-watched',
+    'update:trakt-rating-stars',
     'rate-selected-on-trakt',
-    'toggle-related-trakt-watched',
+    'set-related-trakt-watched',
     'rate-related-on-trakt',
   ],
   computed: {
@@ -309,9 +300,11 @@ export default {
   },
   methods: {
     formatDate,
-    updateSelectedTraktRating(event) {
-      this.$emit('update:trakt-rating-points', event.target.value);
-      this.$emit('rate-selected-on-trakt');
+    onSelectedRatingUpdate(value) {
+      this.$emit('update:trakt-rating-stars', value);
+      if (value) {
+        this.$emit('rate-selected-on-trakt');
+      }
     },
   },
 };

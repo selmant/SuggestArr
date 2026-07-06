@@ -76,37 +76,15 @@
   color: var(--color-text-primary);
 }
 
-.trakt-toggle-btn:disabled,
-.trakt-points-select select:disabled {
+.trakt-toggle-btn:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
 
-.trakt-points-select {
-  min-height: 38px;
+.trakt-action-rating,
+.trakt-inline-rating {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.35rem 0.45rem 0.35rem 0.65rem;
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-sm);
-  background-color: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-muted);
-  font-size: 0.78rem;
-  font-weight: 650;
-  text-transform: uppercase;
-}
-
-.trakt-points-select select {
-  min-height: 30px;
-  border: none;
-  border-radius: calc(var(--radius-sm) - 2px);
-  background-color: rgba(0, 0, 0, 0.42);
-  color: var(--color-text-primary);
-  padding: 0.25rem 0.45rem;
-  font-size: 0.86rem;
-  font-weight: 650;
-  cursor: pointer;
 }
 
 .trakt-inline-actions {
@@ -118,8 +96,7 @@
 }
 
 .trakt-inline-state,
-.trakt-inline-btn,
-.trakt-inline-points {
+.trakt-inline-btn {
   min-height: 30px;
   display: inline-flex;
   align-items: center;
@@ -156,33 +133,232 @@
   color: var(--color-text-primary);
 }
 
-.trakt-inline-btn:disabled,
-.trakt-inline-points select:disabled {
+.trakt-inline-btn:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
 
-.trakt-inline-points {
-  padding: 0.25rem 0.35rem 0.25rem 0.5rem;
-  border: 1px solid var(--color-border-light);
-  background-color: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-muted);
+/* Interactive 5-star Trakt rating */
+.trakt-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.trakt-stars__track {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.12rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.18);
+  background:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.12), rgba(8, 8, 12, 0.55));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 4px 14px rgba(0, 0, 0, 0.22);
+}
+
+.trakt-stars--rated .trakt-stars__track {
+  border-color: rgba(251, 191, 36, 0.42);
+  background:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.22), rgba(120, 53, 15, 0.28));
+}
+
+.trakt-stars__star {
+  position: relative;
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.trakt-stars__glyph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  pointer-events: none;
+}
+
+.trakt-stars__glyph--empty {
+  color: rgba(255, 255, 255, 0.22);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.trakt-stars__glyph--fill {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  overflow: hidden;
+  color: #fbbf24;
+  filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.55));
+}
+
+.trakt-stars__star:hover .trakt-stars__glyph--empty,
+.trakt-stars:hover .trakt-stars__glyph--empty {
+  color: rgba(251, 191, 36, 0.38);
+}
+
+.trakt-stars__value {
+  min-width: 1.8rem;
+  color: #fde68a;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 10px rgba(251, 191, 36, 0.35);
+}
+
+.trakt-stars--compact .trakt-stars__track {
+  gap: 0.06rem;
+  padding: 0.14rem 0.28rem;
+}
+
+.trakt-stars--compact .trakt-stars__star {
+  width: 0.92rem;
+  height: 0.92rem;
+}
+
+.trakt-stars--compact .trakt-stars__glyph {
+  font-size: 0.82rem;
+}
+
+.trakt-stars--disabled .trakt-stars__star {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Poster overlay dock */
+.trakt-poster-dock {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.55rem 0.5rem;
+  pointer-events: auto;
+  border-top: 1px solid rgba(237, 28, 36, 0.22);
+  background:
+    linear-gradient(180deg, rgba(8, 8, 12, 0.05) 0%, rgba(8, 8, 12, 0.88) 38%, rgba(8, 8, 12, 0.96) 100%);
+  backdrop-filter: blur(10px);
+}
+
+.trakt-poster-dock--watched {
+  border-top-color: rgba(34, 197, 94, 0.35);
+}
+
+.trakt-poster-dock__status {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #f8fafc;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
-.trakt-inline-points select {
-  min-height: 24px;
-  border: none;
-  border-radius: calc(var(--radius-sm) - 2px);
-  background-color: rgba(0, 0, 0, 0.38);
-  color: var(--color-text-primary);
-  padding: 0.15rem 0.35rem;
-  font-size: 0.78rem;
-  font-weight: 650;
+.trakt-poster-dock__status .icon-trakt {
+  flex: 0 0 auto;
+  color: #ed1c24;
+  font-size: 0.85rem;
+}
+
+.trakt-poster-dock__status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trakt-poster-dock__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.trakt-poster-dock__rate {
+  display: inline-flex;
+  align-items: center;
+}
+
+.trakt-poster-dock__rate .trakt-stars__track {
+  gap: 0.04rem;
+  padding: 0.12rem 0.24rem;
+  border-color: rgba(251, 191, 36, 0.24);
+  background:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.16), rgba(8, 8, 12, 0.72));
+}
+
+.trakt-poster-dock__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+  font-size: 0.68rem;
+  font-weight: 700;
   cursor: pointer;
+  transition: var(--transition-base);
+}
+
+.trakt-poster-dock__btn:hover:not(:disabled),
+.trakt-poster-dock__btn.is-active {
+  border-color: rgba(237, 28, 36, 0.55);
+  background: rgba(237, 28, 36, 0.22);
+}
+
+.trakt-poster-dock__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.trakt-poster-dock--compact {
+  padding: 0.4rem 0.35rem 0.35rem;
+  gap: 0.25rem;
+}
+
+.trakt-poster-dock--compact .trakt-poster-dock__status span,
+.trakt-poster-dock--compact .trakt-poster-dock__btn-text {
+  display: none;
+}
+
+.trakt-poster-dock--compact .trakt-poster-dock__btn {
+  min-width: 1.65rem;
+  min-height: 1.65rem;
+  padding: 0.2rem;
+}
+
+.trakt-poster-dock--compact .trakt-poster-dock__rate .trakt-stars__star {
+  width: 0.78rem;
+  height: 0.78rem;
+}
+
+.trakt-poster-dock--compact .trakt-poster-dock__rate .trakt-stars__glyph {
+  font-size: 0.72rem;
 }
 
 @media (max-width: 768px) {
+  .trakt-poster-dock__btn-text {
+    display: none;
+  }
+
   .trakt-action-strip {
     align-items: stretch;
     flex-direction: column;
@@ -194,13 +370,8 @@
     flex-direction: column;
   }
 
-  .trakt-toggle-btn,
-  .trakt-points-select {
+  .trakt-toggle-btn {
     width: 100%;
     justify-content: space-between;
-  }
-
-  .trakt-points-select select {
-    min-width: 7rem;
   }
 }

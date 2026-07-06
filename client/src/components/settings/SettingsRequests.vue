@@ -82,6 +82,9 @@
             :item="request"
             compact
             :show-source="false"
+            v-bind="posterTraktProps(request)"
+            @set-trakt-watched="setTraktWatchedFor(request, $event)"
+            @rate-trakt="rateRequestOnTraktFor(request, $event)"
             @select="openRequestModal" />
         </div>
 
@@ -99,7 +102,21 @@
     <RequestDetailsModal
       :show="showModal"
       :selected-source="selectedRequest"
-      @close="closeRequestModal" />
+      :trakt-modal-target="getTraktModalTarget(selectedRequest)"
+      :can-show-related-trakt="canShowRelatedTrakt"
+      :trakt-status="traktStatus"
+      :trakt-status-loading="traktStatusLoading"
+      :trakt-action-loading="traktActionLoading"
+      :trakt-status-error="traktStatusError"
+      :trakt-rating-stars="traktRatingStars"
+      :get-trakt-status="getTraktStatus"
+      :get-trakt-rating-stars="getTraktRatingStars"
+      :get-trakt-inline-label="getTraktInlineLabel"
+      :is-trakt-busy="isTraktBusy"
+      @close="closeRequestModal"
+      @set-trakt-watched="setTraktWatchedForSource(selectedRequest, $event)"
+      @update:trakt-rating-stars="traktRatingStars = $event"
+      @rate-selected-on-trakt="rateSelectedOnTraktForSource(selectedRequest)" />
   </div>
 </template>
 
@@ -107,12 +124,18 @@
 import axios from 'axios';
 import RequestPosterCard from '@/components/common/RequestPosterCard.vue';
 import RequestDetailsModal from '@/components/common/RequestDetailsModal.vue';
+import { useRequestTraktActions } from '@/composables/useRequestTraktActions';
 
 export default {
   name: 'SettingsRequests',
   components: {
     RequestPosterCard,
     RequestDetailsModal,
+  },
+  setup() {
+    return {
+      ...useRequestTraktActions(),
+    };
   },
   data() {
     return {
@@ -144,6 +167,7 @@ export default {
     }
   },
   mounted() {
+    this.setModalTargetResolver(() => this.getTraktModalTarget(this.selectedRequest));
     this.loadStats();
     this.loadRecentRequests();
   },
@@ -164,6 +188,7 @@ export default {
     async loadRecentRequests() {
       this.loading = true;
       try {
+        await this.loadTraktDefaults();
         const response = await axios.get('/api/automation/requests', {
           params: {
             page: 1,
@@ -187,6 +212,7 @@ export default {
         });
 
         this.recentRequests = allRequests.slice(0, 20);
+        this.prefetchPosterTraktStatuses(this.recentRequests);
       } catch (error) {
         console.error('Error loading recent requests:', error);
       } finally {
@@ -202,13 +228,20 @@ export default {
 
     openRequestModal(request) {
       this.selectedRequest = request;
+      this.applyTraktStatus(null);
+      this.traktStatusError = '';
       this.showModal = true;
       document.body.style.overflow = 'hidden';
+      this.$nextTick(() => {
+        this.loadTraktStatusForSource(this.selectedRequest);
+      });
     },
 
     closeRequestModal() {
       this.showModal = false;
       this.selectedRequest = null;
+      this.applyTraktStatus(null);
+      this.traktStatusError = '';
       document.body.style.overflow = 'auto';
     },
 

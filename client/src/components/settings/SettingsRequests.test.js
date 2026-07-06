@@ -17,7 +17,9 @@ test('recent requests and requests page reuse RequestPosterCard', () => {
   assert.match(settingsRequestsSource, /<RequestDetailsModal/);
   assert.match(settingsRequestsSource, /import RequestPosterCard from '@\/components\/common\/RequestPosterCard.vue';/);
   assert.match(settingsRequestsSource, /import RequestDetailsModal from '@\/components\/common\/RequestDetailsModal.vue';/);
-  assert.match(settingsRequestsSource, /@select="openRequestModal"/);
+  assert.match(settingsRequestsSource, /posterTraktProps\(request\)/);
+  assert.match(settingsRequestsSource, /useRequestTraktActions/);
+  assert.match(settingsRequestsSource, /prefetchPosterTraktStatuses/);
   assert.match(settingsRequestsSource, /goToRequestsPage\(\) \{/);
   assert.match(settingsRequestsSource, /source_id: source\.source_id/);
   assert.doesNotMatch(settingsRequestsSource, /class="request-card request-card-compact"/);
@@ -71,5 +73,7 @@ test('request poster card keeps metadata on the poster artwork', () => {
   assert.match(requestPosterCardSource, /From: <strong>{{ sourceContentMetadata\.label }}<\/strong>/);
   assert.match(requestPosterCardSource, /showSourceContent\(\) \{/);
   assert.doesNotMatch(requestPosterCardSource, /class="badge-container"/);
-  assert.doesNotMatch(requestPosterCardSource, /class="badge badge-media"/);
+  assert.match(requestPosterCardSource, /class="trakt-poster-dock"/);
+  assert.match(requestPosterCardSource, /TraktStarRating/);
+  assert.doesNotMatch(requestPosterCardSource, /<select/);
 });

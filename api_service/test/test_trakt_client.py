@@ -421,11 +421,16 @@ async def test_remove_rating_posts_movie_with_tmdb_id():
 @pytest.mark.asyncio
 async def test_get_item_sync_status_reads_watched_and_rating():
     session = FakeSession([
-        FakeResponse(200, [{"movie": {"ids": {"tmdb": 550}}}]),
-        FakeResponse(200, [{"rating": 9, "movie": {"ids": {"tmdb": 550}}}]),
+        FakeResponse(200, [{"movie": {"ids": {"trakt": 666, "tmdb": 550}}}]),
+        FakeResponse(200, {"watched_at": "2014-09-01T09:10:11.000Z"}),
+        FakeResponse(200, {"rating": 9, "rated_at": "2014-09-01T09:10:11.000Z"}),
     ])
     client = TraktClient("cid", "secret", "access", "refresh", expires_at=int(time.time()) + 3600, session=session)
 
     result = await client.get_item_sync_status("movie", "550")
 
     assert result == {"watched": True, "rating": 9}
+    urls = [call[1] for call in session.calls]
+    assert "https://api.trakt.tv/search/tmdb/550" in urls
+    assert "https://api.trakt.tv/movies/666/watched" in urls
+    assert "https://api.trakt.tv/movies/666/rating" in urls

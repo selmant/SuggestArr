@@ -9,6 +9,7 @@ from api_service.config.logger_manager import LoggerManager
 from api_service.db.database_manager import DatabaseManager
 from api_service.services.trakt.request_actions import (
     get_request_trakt_status,
+    get_request_trakt_statuses_batch,
     mark_request_watched,
     set_request_rating,
     unmark_request_watched,
@@ -147,6 +148,35 @@ def get_request_trakt_status_route(tmdb_id: str, media_type: str):
         return jsonify({"message": str(exc)}), 502
     except Exception as exc:
         logger.error("Error fetching Trakt status: %s", exc, exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/trakt/status-batch', methods=['POST'])
+def get_request_trakt_statuses_batch_route():
+    """Return Trakt watched/rating status for many requests in one cached sync pass."""
+    try:
+        payload = _get_json()
+        user_id = str(payload.get("user_id") or "")
+        if not user_id:
+            return jsonify({"message": "user_id is required"}), 400
+        items = payload.get("items")
+        if not isinstance(items, list):
+            return jsonify({"message": "items must be a list"}), 400
+        result = async_to_sync(get_request_trakt_statuses_batch)(
+            DatabaseManager(),
+            user_id,
+            items,
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message.lower() or "not linked" in message.lower() else 400
+        return jsonify({"message": message}), status
+    except RuntimeError as exc:
+        logger.warning("Trakt batch status failed: %s", exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error fetching Trakt batch status: %s", exc, exc_info=True)
         return jsonify({"error": "An internal error occurred"}), 500
 
 
