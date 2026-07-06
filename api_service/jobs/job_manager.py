@@ -132,7 +132,9 @@ class JobManager:
             id=job_id,
             name=job['name'],
             args=[job['id']],
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
         )
 
         self.logger.info(f"Scheduled job: {job['name']} with schedule: {job['schedule_value']}")

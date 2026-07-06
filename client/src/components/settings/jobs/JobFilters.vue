@@ -113,7 +113,7 @@
     </div>
 
     <!-- Minimum Seasons Filter (TV only, discover/recommendation) -->
-    <div v-if="mediaType === 'tv' && jobType !== 'trakt_recommendations'" class="form-group">
+    <div v-if="mediaType === 'tv' && jobType !== 'trakt_recommendations' && jobType !== 'trakt_list'" class="form-group">
       <label for="minSeasons">Minimum Seasons: {{ localFilters.min_seasons || 1 }}</label>
       <input
         id="minSeasons"

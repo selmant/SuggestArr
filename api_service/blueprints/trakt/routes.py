@@ -545,6 +545,130 @@ def preview_my_recent_items():
         return jsonify({"message": "Error fetching Trakt recent items", "status": "error"}), 500
 
 
+async def _get_user_lists(
+    client_id: str,
+    client_secret: str,
+    db: DatabaseManager,
+    link: dict[str, Any],
+    tokens: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Fetch custom Trakt lists for a linked media user."""
+    async with TraktClient(
+        client_id,
+        client_secret,
+        access_token=tokens.get("access_token", ""),
+        refresh_token=tokens.get("refresh_token", ""),
+        expires_at=tokens.get("expires_at"),
+        db=db,
+        link_id=link["id"],
+        token_source=link.get("token_source", "manual_oauth"),
+    ) as client:
+        return await client.get_user_lists("me", authenticated=True)
+
+
+async def _resolve_public_list(
+    client_id: str,
+    client_secret: str,
+    list_url: str,
+) -> dict[str, Any]:
+    """Validate a public Trakt list URL and return metadata."""
+    list_user, list_ref = TraktClient.parse_list_url(list_url)
+    async with TraktClient(client_id, client_secret) as client:
+        metadata = await client.get_list_metadata(list_user, list_ref, authenticated=False)
+        items = await client.get_list_items(
+            list_user,
+            list_ref,
+            "both",
+            limit=100,
+            authenticated=False,
+        )
+    return {
+        **metadata,
+        "username": metadata.get("username") or list_user or "",
+        "list_ref": list_ref,
+        "preview_count": len(items),
+    }
+
+
+@trakt_bp.route("/lists/resolve", methods=["POST"])
+@require_role("admin")
+def resolve_public_list():
+    """Validate a public Trakt list URL and return metadata."""
+    payload = _get_json()
+    list_url = str(payload.get("url") or payload.get("list_url") or "").strip()
+    if not list_url:
+        return jsonify({"message": "List URL is required", "status": "error"}), 400
+
+    client_id, client_secret, _ = _resolve_trakt_credentials({})
+    if not client_id or not client_secret:
+        return jsonify({"message": "Configure Trakt app credentials first", "status": "error"}), 400
+
+    try:
+        result = async_to_sync(_resolve_public_list)(client_id, client_secret, list_url)
+        return jsonify({"status": "success", "list": result}), 200
+    except ValueError as exc:
+        return jsonify({"message": str(exc), "status": "error"}), 400
+    except RuntimeError as exc:
+        logger.warning("Trakt list resolve failed for %s: %s", list_url, exc)
+        return jsonify({"message": str(exc), "status": "error"}), 400
+    except Exception as exc:
+        logger.error("Unexpected Trakt list resolve error for %s: %s", list_url, exc, exc_info=True)
+        return jsonify({"message": "Error resolving Trakt list", "status": "error"}), 500
+
+
+@trakt_bp.route("/media-users/<provider>/<external_user_id>/lists", methods=["GET"])
+@require_role("admin")
+def list_media_user_trakt_lists(provider: str, external_user_id: str):
+    """Admin: list Trakt custom lists and watchlist for a linked media user."""
+    db = DatabaseManager()
+    if _find_selected_user(provider, external_user_id) is None:
+        return jsonify({"message": "Media user not found", "status": "error"}), 404
+
+    client_id, client_secret, _ = _resolve_trakt_credentials({})
+    if not client_id or not client_secret:
+        return jsonify({"message": "Configure Trakt app credentials first", "status": "error"}), 400
+
+    try:
+        identity = db.get_media_user_identity(provider.lower(), str(external_user_id))
+        link = db.get_trakt_account_link(identity["id"])
+        if not link or not link.get("connected"):
+            return jsonify({"message": "Trakt account not linked", "status": "error"}), 404
+        tokens = db.get_trakt_oauth_tokens(link["id"])
+        if not tokens:
+            return jsonify({"message": "Trakt tokens not available", "status": "error"}), 404
+
+        lists = async_to_sync(_get_user_lists)(client_id, client_secret, db, link, tokens)
+        watchlist_entry = {
+            "id": "watchlist",
+            "slug": "watchlist",
+            "name": "Watchlist",
+            "item_count": None,
+            "privacy": "private",
+            "is_watchlist": True,
+        }
+        return jsonify({
+            "status": "success",
+            "provider": provider.lower(),
+            "external_user_id": str(external_user_id),
+            "trakt_username": link.get("trakt_username"),
+            "lists": [watchlist_entry, *lists],
+        }), 200
+    except ValueError:
+        return jsonify({"message": "Media user not found", "status": "error"}), 404
+    except RuntimeError as exc:
+        logger.warning("Trakt list fetch failed for %s/%s: %s", provider, external_user_id, exc)
+        return jsonify({"message": str(exc), "status": "error"}), 400
+    except Exception as exc:
+        logger.error(
+            "Unexpected Trakt list fetch error for %s/%s: %s",
+            provider,
+            external_user_id,
+            exc,
+            exc_info=True,
+        )
+        return jsonify({"message": "Error fetching Trakt lists", "status": "error"}), 500
+
+
 @trakt_bp.route("/sources/<provider>/<external_user_id>", methods=["PUT"])
 @require_role("admin")
 def update_trakt_source(provider: str, external_user_id: str):

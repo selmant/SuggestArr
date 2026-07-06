@@ -193,6 +193,12 @@ export const aiSearchStatus = () => {
 
 // Trakt OAuth device flow (admin, media-user scoped). App credentials are admin
 // settings; account tokens are stored per media-server user (provider + id).
+export const getMediaUserTraktLists = (provider, externalUserId) =>
+    axios.get(`/api/trakt/media-users/${provider}/${encodeURIComponent(externalUserId)}/lists`);
+
+export const resolveTraktList = (url) =>
+    axios.post('/api/trakt/lists/resolve', { url });
+
 export const listTraktMediaUsers = () => axios.get('/api/trakt/media-users');
 
 export const startMediaUserTraktDeviceCode = (provider, externalUserId, credentials = {}) =>

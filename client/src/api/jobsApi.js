@@ -71,7 +71,7 @@ export const jobsApi = {
    */
   async runJobNow(jobId) {
     const response = await axios.post(`/api/jobs/${jobId}/run`);
-    return response.data;
+    return { ...response.data, httpStatus: response.status };
   },
 
   /**

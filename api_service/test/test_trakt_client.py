@@ -434,3 +434,47 @@ async def test_get_item_sync_status_reads_watched_and_rating():
     assert "https://api.trakt.tv/search/tmdb/550" in urls
     assert "https://api.trakt.tv/movies/666/watched" in urls
     assert "https://api.trakt.tv/movies/666/rating" in urls
+
+
+def test_parse_list_url_supports_user_list_and_numeric_id():
+    assert TraktClient.parse_list_url("https://trakt.tv/users/sean/lists/horror") == ("sean", "horror")
+    assert TraktClient.parse_list_url("https://trakt.tv/users/sean/watchlist") == ("sean", "watchlist")
+    assert TraktClient.parse_list_url("https://trakt.tv/lists/12345") == (None, "12345")
+    assert TraktClient.parse_list_url("sean/horror") == ("sean", "horror")
+    assert TraktClient.parse_list_url("sean/watchlist") == ("sean", "watchlist")
+    assert TraktClient.parse_list_url("12345") == (None, "12345")
+
+
+@pytest.mark.asyncio
+async def test_get_list_items_requests_user_list_endpoint():
+    session = FakeSession([
+        FakeResponse(200, [
+            {"type": "movie", "movie": {"title": "Heat", "year": 1995, "ids": {"tmdb": 949}}},
+        ]),
+    ])
+    client = TraktClient("cid", "secret", session=session)
+
+    result = await client.get_list_items("sean", "horror", "movie", limit=10, authenticated=False)
+
+    assert result == [{
+        "tmdb_id": "949",
+        "media_type": "movie",
+        "title": "Heat",
+        "year": 1995,
+    }]
+    assert session.calls[0][1] == "https://api.trakt.tv/users/sean/lists/horror/items/movies"
+
+
+@pytest.mark.asyncio
+async def test_get_watchlist_items_requests_user_watchlist_endpoint():
+    session = FakeSession([
+        FakeResponse(200, [
+            {"type": "show", "show": {"title": "Dark", "year": 2017, "ids": {"tmdb": 70523}}},
+        ]),
+    ])
+    client = TraktClient("cid", "secret", "access", session=session)
+
+    result = await client.get_watchlist_items("me", "tv", limit=10, authenticated=True)
+
+    assert result[0]["tmdb_id"] == "70523"
+    assert session.calls[0][1] == "https://api.trakt.tv/users/me/watchlist/shows"

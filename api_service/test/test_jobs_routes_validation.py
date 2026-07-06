@@ -123,3 +123,76 @@ def test_dry_run_trakt_job_initializes_in_dry_run_mode(monkeypatch):
 
     assert response.status_code == 200
     create.assert_awaited_once_with(2, dry_run=True)
+
+
+def test_create_trakt_list_job_requires_list_url(monkeypatch):
+    client, repository = _make_client(monkeypatch)
+    payload = {
+        "name": "Horror List",
+        "job_type": "trakt_list",
+        "media_type": "movie",
+        "filters": {"list_source": "public_url"},
+        "schedule_type": "preset",
+        "schedule_value": "daily",
+    }
+
+    response = client.post("/api/jobs", json=payload)
+
+    assert response.status_code == 400
+    assert "list URL" in response.get_json()["message"]
+    repository.create_job.assert_not_called()
+
+
+def test_create_trakt_list_job_accepts_public_url(monkeypatch):
+    client, repository = _make_client(monkeypatch)
+    repository.create_job.return_value = 9
+    payload = {
+        "name": "Horror List",
+        "job_type": "trakt_list",
+        "media_type": "movie",
+        "filters": {
+            "list_source": "public_url",
+            "list_url": "https://trakt.tv/users/sean/lists/horror",
+            "dedup_mode": "global",
+        },
+        "schedule_type": "preset",
+        "schedule_value": "daily",
+    }
+
+    response = client.post("/api/jobs", json=payload)
+
+    assert response.status_code == 201
+    repository.create_job.assert_called_once()
+
+
+def test_run_job_now_returns_202_and_starts_background_thread(monkeypatch):
+    existing = {
+        "id": 3,
+        "job_type": "discover",
+        "owner_id": 1,
+        "name": "Test",
+    }
+    client, _repository = _make_client(monkeypatch, existing_job=existing)
+    manager = MagicMock()
+    manager._should_pause_for_pending_requests = AsyncMock(return_value=False)
+    monkeypatch.setattr(jobs_routes, "get_job_manager", MagicMock(return_value=manager))
+    monkeypatch.setattr(jobs_routes, "run_async", lambda coro: asyncio.run(coro))
+
+    started = {}
+
+    class FakeThread:
+        def __init__(self, target=None, args=(), daemon=None):
+            started["target"] = target
+            started["args"] = args
+
+        def start(self):
+            started["started"] = True
+
+    monkeypatch.setattr(jobs_routes.threading, "Thread", FakeThread)
+
+    response = client.post("/api/jobs/3/run")
+
+    assert response.status_code == 202
+    assert response.get_json()["status"] == "started"
+    assert started["started"] is True
+    assert started["args"] == (3, "discover")

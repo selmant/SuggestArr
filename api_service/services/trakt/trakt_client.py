@@ -1,7 +1,9 @@
 import asyncio
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import unquote, urlparse
 
 import aiohttp
 
@@ -261,6 +263,192 @@ class TraktClient(BaseHTTPClient):
                 return None
             raise
 
+    @staticmethod
+    def parse_list_url(value: str) -> tuple[Optional[str], str]:
+        """Parse a Trakt list URL or shorthand into ``(username, list_ref)``.
+
+        Supports:
+        - ``https://trakt.tv/users/{user}/lists/{slug}``
+        - ``https://trakt.tv/users/{user}/watchlist``
+        - ``https://trakt.tv/lists/{id}``
+        - ``{user}/{slug}`` or ``{user}/watchlist``
+        - bare slug or numeric list id
+
+        Args:
+            value: User-supplied list URL or reference.
+
+        Returns:
+            Tuple of optional username and list slug/id string.
+
+        Raises:
+            ValueError: When the value cannot be parsed.
+        """
+        text = unquote(str(value or "").strip())
+        if not text:
+            raise ValueError("List URL or reference is required")
+
+        if text.startswith("http://") or text.startswith("https://"):
+            parsed = urlparse(text)
+            path = (parsed.path or "").strip("/")
+            parts = [part for part in path.split("/") if part]
+            if len(parts) >= 4 and parts[0] == "users" and parts[2] == "lists":
+                return parts[1], parts[3]
+            if len(parts) == 3 and parts[0] == "users" and parts[2] == "watchlist":
+                return parts[1], "watchlist"
+            if len(parts) >= 2 and parts[0] == "lists":
+                return None, parts[1]
+            raise ValueError(f"Unsupported Trakt list URL: {value}")
+
+        if "/" in text:
+            user, list_ref = text.split("/", 1)
+            user = user.strip()
+            list_ref = list_ref.strip().lower()
+            if not user or not list_ref:
+                raise ValueError(f"Invalid Trakt list reference: {value}")
+            if list_ref == "watchlist":
+                return user, "watchlist"
+            return user, list_ref
+
+        if re.fullmatch(r"\d+", text):
+            return None, text
+        return None, text
+
+    @staticmethod
+    def _list_item_types(media_type: str) -> str:
+        if media_type == "movie":
+            return "movies"
+        if media_type == "tv":
+            return "shows"
+        if media_type == "both":
+            return "movies,shows"
+        raise ValueError("media_type must be 'movie', 'tv', or 'both'")
+
+    async def get_user_lists(self, list_user: str = "me", *, authenticated: bool = True) -> list[dict[str, Any]]:
+        """Fetch custom Trakt lists for a user.
+
+        Args:
+            list_user: Trakt username/slug or ``me`` for the authenticated user.
+            authenticated: Whether to send OAuth credentials.
+
+        Returns:
+            Normalized list metadata dictionaries.
+        """
+        user = (list_user or "me").strip() or "me"
+        payload = await self._request(
+            "GET",
+            f"/users/{user}/lists",
+            params={"extended": "min"},
+            authenticated=authenticated,
+        )
+        return self._normalize_user_lists(payload)
+
+    async def get_list_metadata(
+        self,
+        list_user: Optional[str],
+        list_ref: str,
+        *,
+        authenticated: bool = True,
+    ) -> dict[str, Any]:
+        """Fetch metadata for a single Trakt list.
+
+        Args:
+            list_user: Trakt username when the list is user-scoped.
+            list_ref: List slug or numeric id.
+            authenticated: Whether to send OAuth credentials.
+
+        Returns:
+            Normalized list metadata.
+        """
+        list_ref = str(list_ref or "").strip()
+        if not list_ref:
+            raise ValueError("list_ref is required")
+
+        if list_user:
+            path = f"/users/{list_user}/lists/{list_ref}"
+        else:
+            path = f"/lists/{list_ref}"
+        payload = await self._request("GET", path, authenticated=authenticated)
+        return self._normalize_list_metadata(payload)
+
+    async def get_list_items(
+        self,
+        list_user: Optional[str],
+        list_ref: str,
+        media_type: str,
+        *,
+        limit: int = 100,
+        authenticated: bool = True,
+    ) -> list[dict[str, str]]:
+        """Fetch items from a Trakt custom list.
+
+        Args:
+            list_user: Trakt username when the list is user-scoped.
+            list_ref: List slug or numeric id.
+            media_type: ``movie``, ``tv``, or ``both``.
+            limit: Maximum number of items to return.
+            authenticated: Whether to send OAuth credentials.
+
+        Returns:
+            Normalized list items with TMDB ids.
+        """
+        list_ref = str(list_ref or "").strip()
+        if not list_ref:
+            raise ValueError("list_ref is required")
+
+        item_types = self._list_item_types(media_type)
+        params: dict[str, Any] = {
+            "limit": max(1, min(int(limit), 100)),
+            "extended": "min",
+        }
+        if list_user:
+            path = f"/users/{list_user}/lists/{list_ref}/items/{item_types}"
+        else:
+            path = f"/lists/{list_ref}/items/{item_types}"
+
+        payload = await self._request("GET", path, params=params, authenticated=authenticated)
+        return self._normalize_list_items(payload)
+
+    async def get_watchlist_items(
+        self,
+        list_user: str,
+        media_type: str,
+        *,
+        limit: int = 100,
+        authenticated: bool = True,
+    ) -> list[dict[str, str]]:
+        """Fetch a user's Trakt watchlist items.
+
+        Args:
+            list_user: Trakt username/slug or ``me``.
+            media_type: ``movie``, ``tv``, or ``both``.
+            limit: Maximum number of items to return per type.
+            authenticated: Whether to send OAuth credentials.
+
+        Returns:
+            Normalized watchlist items with TMDB ids.
+        """
+        user = (list_user or "me").strip() or "me"
+        per_type_limit = max(1, min(int(limit), 100))
+        media_types = ["movie", "tv"] if media_type == "both" else [media_type]
+        items: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        for item_type in media_types:
+            trakt_type = "movies" if item_type == "movie" else "shows"
+            payload = await self._request(
+                "GET",
+                f"/users/{user}/watchlist/{trakt_type}",
+                params={"limit": per_type_limit, "extended": "min"},
+                authenticated=authenticated,
+            )
+            for normalized in self._normalize_list_items(payload):
+                key = (normalized["media_type"], normalized["tmdb_id"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                items.append(normalized)
+        return items
+
     async def get_recommendations(
         self,
         media_type: str,
@@ -495,6 +683,63 @@ class TraktClient(BaseHTTPClient):
             seen.add(tmdb_id)
             items.append(normalized)
         return items
+
+    def _normalize_list_items(self, payload: list[dict[str, Any]]) -> list[dict[str, str]]:
+        """Normalize Trakt list/watchlist payloads into TMDB-keyed items."""
+        items: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for entry in payload or []:
+            entry_type = entry.get("type")
+            if entry_type == "movie":
+                normalized = self._normalize_media_item(entry.get("movie"), "movie")
+            elif entry_type in ("show", "episode"):
+                normalized = self._normalize_media_item(entry.get("show"), "tv")
+            else:
+                normalized = None
+            if not normalized:
+                continue
+            key = (normalized["media_type"], normalized["tmdb_id"])
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(normalized)
+        return items
+
+    @staticmethod
+    def _normalize_user_lists(payload: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Normalize Trakt custom list metadata."""
+        lists: list[dict[str, Any]] = []
+        for entry in payload or []:
+            ids = entry.get("ids") or {}
+            slug = entry.get("slug") or ids.get("slug") or ""
+            list_id = ids.get("trakt")
+            lists.append({
+                "id": str(list_id) if list_id is not None else "",
+                "slug": str(slug),
+                "name": entry.get("name") or entry.get("title") or str(slug),
+                "item_count": int(entry.get("item_count") or 0),
+                "privacy": entry.get("privacy"),
+            })
+        return lists
+
+    @staticmethod
+    def _normalize_list_metadata(payload: Optional[dict[str, Any]]) -> dict[str, Any]:
+        """Normalize a single Trakt list metadata payload."""
+        payload = payload or {}
+        ids = payload.get("ids") or {}
+        slug = payload.get("slug") or ids.get("slug") or ""
+        list_id = ids.get("trakt")
+        user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+        user_ids = user.get("ids") if isinstance(user.get("ids"), dict) else {}
+        username = user.get("username") or user.get("slug") or user_ids.get("slug") or ""
+        return {
+            "id": str(list_id) if list_id is not None else "",
+            "slug": str(slug),
+            "name": payload.get("name") or payload.get("title") or str(slug),
+            "item_count": int(payload.get("item_count") or 0),
+            "privacy": payload.get("privacy"),
+            "username": str(username),
+        }
 
     @staticmethod
     def _normalize_watched_items(payload: list[dict[str, Any]], item_key: str) -> list[dict[str, str]]:

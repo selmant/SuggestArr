@@ -3,6 +3,8 @@ Provides CRUD operations and job execution endpoints.
 """
 import threading
 import traceback
+from typing import Optional
+
 from flask import Blueprint, jsonify, request, g
 
 from api_service.auth.limiter import limiter
@@ -17,14 +19,22 @@ from api_service.jobs.trakt_recommendations_automation import (
     TraktRecommendationsAutomation,
     execute_trakt_recommendations_job,
 )
+from api_service.jobs.trakt_list_automation import (
+    TraktListAutomation,
+    execute_trakt_list_job,
+)
 from api_service.utils.asyncio_loop import run_coroutine_sync
 
 logger = LoggerManager.get_logger("JobsRoute")
 jobs_bp = Blueprint('jobs', __name__)
 jobs_bp.strict_slashes = False
 
+VALID_JOB_TYPES = ['discover', 'recommendation', 'trakt_recommendations', 'trakt_list']
+
 _run_all_lock = threading.Lock()
 _run_all_running = False
+_running_jobs_lock = threading.Lock()
+_running_job_ids: set[int] = set()
 
 
 def run_async(coro):
@@ -50,7 +60,24 @@ def get_job_manager() -> JobManager:
         manager.set_job_executor(execute_recommendation_job, job_type='recommendation')
     if 'trakt_recommendations' not in manager._job_executors:
         manager.set_job_executor(execute_trakt_recommendations_job, job_type='trakt_recommendations')
+    if 'trakt_list' not in manager._job_executors:
+        manager.set_job_executor(execute_trakt_list_job, job_type='trakt_list')
     return manager
+
+
+def _validate_trakt_list_job(data: dict) -> Optional[str]:
+    """Return an error message when a trakt_list job payload is invalid."""
+    filters = data.get('filters') or {}
+    list_source = str(filters.get('list_source') or 'public_url').strip()
+    if list_source == 'linked_user':
+        if len(data.get('user_ids') or []) != 1:
+            return 'Trakt list jobs in linked-user mode require exactly one linked media user'
+        if not filters.get('watchlist') and not str(filters.get('list_ref') or filters.get('list_slug') or '').strip():
+            return 'Trakt list jobs require a selected list or watchlist'
+        return None
+    if not str(filters.get('list_url') or '').strip():
+        return 'Trakt list jobs require a list URL'
+    return None
 
 
 @jobs_bp.route('', methods=['GET'])
@@ -171,10 +198,10 @@ def create_job():
 
         # Set default job_type
         job_type = data.get('job_type', 'discover')
-        if job_type not in ['discover', 'recommendation', 'trakt_recommendations']:
+        if job_type not in VALID_JOB_TYPES:
             return jsonify({
                 'status': 'error',
-                'message': 'job_type must be one of: discover, recommendation, trakt_recommendations'
+                'message': f'job_type must be one of: {", ".join(VALID_JOB_TYPES)}'
             }), 400
         data['job_type'] = job_type
         
@@ -199,6 +226,11 @@ def create_job():
                 'status': 'error',
                 'message': 'Trakt recommendations jobs require exactly one linked media user'
             }), 400
+
+        if job_type == 'trakt_list':
+            list_error = _validate_trakt_list_job(data)
+            if list_error:
+                return jsonify({'status': 'error', 'message': list_error}), 400
 
         # Validate schedule_type
         if data['schedule_type'] not in ['preset', 'cron']:
@@ -261,10 +293,10 @@ def update_job(job_id: int):
 
         # Validate job_type if provided
         job_type = data.get('job_type', existing.get('job_type', 'discover'))
-        if 'job_type' in data and job_type not in ['discover', 'recommendation', 'trakt_recommendations']:
+        if 'job_type' in data and job_type not in VALID_JOB_TYPES:
             return jsonify({
                 'status': 'error',
-                'message': 'job_type must be one of: discover, recommendation, trakt_recommendations'
+                'message': f'job_type must be one of: {", ".join(VALID_JOB_TYPES)}'
             }), 400
 
         # Validate media_type if provided
@@ -282,6 +314,12 @@ def update_job(job_id: int):
                     'status': 'error',
                     'message': 'Trakt recommendations jobs require exactly one linked media user'
                 }), 400
+
+        if job_type == 'trakt_list':
+            merged = {**existing, **data}
+            list_error = _validate_trakt_list_job(merged)
+            if list_error:
+                return jsonify({'status': 'error', 'message': list_error}), 400
 
         # Validate schedule_type if provided
         if 'schedule_type' in data and data['schedule_type'] not in ['preset', 'cron']:
@@ -416,6 +454,24 @@ def toggle_job(job_id: int):
         return jsonify({'status': 'error', 'message': 'An internal error occurred'}), 500
 
 
+def _run_job_in_background(job_id: int, job_type: str) -> None:
+    """Execute a single job in a background thread."""
+    try:
+        if job_type == 'recommendation':
+            run_async(execute_recommendation_job(job_id))
+        elif job_type == 'trakt_recommendations':
+            run_async(execute_trakt_recommendations_job(job_id))
+        elif job_type == 'trakt_list':
+            run_async(execute_trakt_list_job(job_id))
+        else:
+            run_async(execute_discover_job(job_id))
+    except Exception as exc:
+        logger.error(f"Background job {job_id} failed: {exc}", exc_info=True)
+    finally:
+        with _running_jobs_lock:
+            _running_job_ids.discard(job_id)
+
+
 @jobs_bp.route('/<int:job_id>/run', methods=['POST'])
 @limiter.limit("5 per minute")
 def run_job_now(job_id: int):
@@ -449,6 +505,11 @@ def run_job_now(job_id: int):
         job_type = job.get('job_type', 'discover')
         logger.info(f"Running {job_type} job {job_id} immediately")
 
+        with _running_jobs_lock:
+            if job_id in _running_job_ids:
+                return jsonify({'status': 'busy', 'message': 'Job is already running.'}), 409
+            _running_job_ids.add(job_id)
+
         manager = get_job_manager()
         if run_async(manager._should_pause_for_pending_requests(job)):
             exec_id = repository.log_execution_start(job_id)
@@ -459,6 +520,8 @@ def run_job_now(job_id: int):
                 requested_count=0,
                 error_message='Paused: Seer has pending requests awaiting approval or denial.'
             )
+            with _running_jobs_lock:
+                _running_job_ids.discard(job_id)
             return jsonify({
                 'status': 'paused',
                 'message': 'Job paused because Seer has pending requests awaiting approval or denial.',
@@ -466,28 +529,22 @@ def run_job_now(job_id: int):
                 'requested_count': 0
             }), 200
 
-        # Execute job based on type (async function called synchronously)
-        if job_type == 'recommendation':
-            result = run_async(execute_recommendation_job(job_id))
-        elif job_type == 'trakt_recommendations':
-            result = run_async(execute_trakt_recommendations_job(job_id))
-        else:
-            result = run_async(execute_discover_job(job_id))
+        thread = threading.Thread(
+            target=_run_job_in_background,
+            args=(job_id, job_type),
+            daemon=True,
+        )
+        thread.start()
 
-        if result.success:
-            return jsonify({
-                'status': 'success',
-                'message': 'Job executed successfully',
-                'results_count': result.results_count,
-                'requested_count': result.requested_count
-            }), 200
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': result.error_message or 'Job execution failed'
-            }), 500
+        return jsonify({
+            'status': 'started',
+            'message': 'Job started in the background.',
+            'job_id': job_id,
+        }), 202
 
     except Exception as e:
+        with _running_jobs_lock:
+            _running_job_ids.discard(job_id)
         logger.error(f"Error running job {job_id}: {e}", exc_info=True)
         return jsonify({'status': 'error', 'message': 'An internal error occurred'}), 500
 
@@ -533,6 +590,8 @@ def dry_run_job(job_id: int):
                 automation = await RecommendationAutomation.create(job_id, dry_run=True)
             elif job_type == 'trakt_recommendations':
                 automation = await TraktRecommendationsAutomation.create(job_id, dry_run=True)
+            elif job_type == 'trakt_list':
+                automation = await TraktListAutomation.create(job_id, dry_run=True)
             else:
                 automation = await DiscoverAutomation.create(job_id)
             return await automation.run(dry_run=True)
@@ -571,6 +630,15 @@ def _run_all_jobs_in_background():
         for job in jobs:
             job_id = job['id']
             job_type = job.get('job_type', 'discover')
+            with _running_jobs_lock:
+                if job_id in _running_job_ids:
+                    logger.info(
+                        "Force run all: skipping job %s (%s) because it is already running.",
+                        job_id,
+                        job.get('name', ''),
+                    )
+                    continue
+                _running_job_ids.add(job_id)
             try:
                 logger.info(f"Force run all: starting {job_type} job {job_id} ({job.get('name', '')})")
                 manager = get_job_manager()
@@ -592,11 +660,16 @@ def _run_all_jobs_in_background():
                     run_async(execute_recommendation_job(job_id))
                 elif job_type == 'trakt_recommendations':
                     run_async(execute_trakt_recommendations_job(job_id))
+                elif job_type == 'trakt_list':
+                    run_async(execute_trakt_list_job(job_id))
                 else:
                     run_async(execute_discover_job(job_id))
                 logger.info(f"Force run all: job {job_id} completed")
             except Exception as e:
                 logger.error(f"Force run all: error in job {job_id}: {e}", exc_info=True)
+            finally:
+                with _running_jobs_lock:
+                    _running_job_ids.discard(job_id)
 
         logger.info("Force run all: finished")
     finally:

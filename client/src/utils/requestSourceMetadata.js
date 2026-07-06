@@ -14,6 +14,11 @@ const METHOD_METADATA = {
     shortLabel: 'Trakt',
     icon: 'icon-trakt',
   },
+  trakt_list: {
+    label: 'Trakt List',
+    shortLabel: 'Trakt List',
+    icon: 'icon-trakt',
+  },
 };
 
 const SYNTHETIC_SOURCE_IDS = new Set(Object.keys(METHOD_METADATA));

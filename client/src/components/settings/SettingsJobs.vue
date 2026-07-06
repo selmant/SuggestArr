@@ -60,6 +60,10 @@
             <span class="job-type-badge trakt_recommendations"><i class="icon-trakt"></i> Trakt</span>
             <span>Fetch personalized movie and show recommendations only from a linked Trakt.tv account.</span>
           </div>
+          <div class="job-type-item">
+            <span class="job-type-badge trakt_list"><i class="icon-trakt"></i> Trakt List</span>
+            <span>Sync any Trakt list or watchlist and request new items that are not already requested.</span>
+          </div>
         </div>
       </div>
       <button class="info-box-close" @click="dismissInfoBox" title="Dismiss">
@@ -488,12 +492,43 @@ export default {
 
     async runJob(job) {
       this.isRunning[job.id] = true;
+      let baselineHistoryId = null;
+      try {
+        const baselineResponse = await jobsApi.getJobHistory(job.id, 1);
+        baselineHistoryId = baselineResponse.history?.[0]?.id ?? null;
+      } catch {
+        baselineHistoryId = null;
+      }
       try {
         this.$toast.open({
           message: `Running job: ${job.name}...`,
           type: 'info'
         });
         const response = await jobsApi.runJobNow(job.id);
+        if (response.httpStatus === 409 || response.status === 'busy') {
+          this.$toast.open({
+            message: response.message || 'Job is already running',
+            type: 'warning'
+          });
+          return;
+        }
+        if (response.httpStatus === 202 || response.status === 'started') {
+          this.$toast.open({
+            message: `Job started in background: ${job.name}`,
+            type: 'info',
+            duration: 5000
+          });
+          await this.waitForJobCompletion(job, baselineHistoryId);
+          return;
+        }
+        if (response.status === 'paused') {
+          this.$toast.open({
+            message: response.message || 'Job paused because Seer has pending requests',
+            type: 'warning',
+            duration: 8000
+          });
+          return;
+        }
         if (response.status === 'success') {
           this.$toast.open({
             message: `Job completed: ${response.results_count} found, ${response.requested_count} enqueued for Seer`,
@@ -501,7 +536,6 @@ export default {
             duration: 10000
           });
           await this.loadHistory();
-          // Start polling so the queue banner appears immediately
           await this.pollQueueStatus();
         } else {
           this.$toast.open({
@@ -517,6 +551,79 @@ export default {
         });
       } finally {
         this.isRunning[job.id] = false;
+      }
+    },
+
+    async waitForJobCompletion(job, baselineHistoryId = null, timeoutMs = 30 * 60 * 1000) {
+      const deadline = Date.now() + timeoutMs;
+      const pollIntervalMs = 3000;
+      let trackedExecutionId = null;
+
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+        try {
+          const historyResponse = await jobsApi.getJobHistory(job.id, 5);
+          const history = historyResponse.history || [];
+          if (!history.length) {
+            continue;
+          }
+
+          if (trackedExecutionId == null) {
+            const newRun = history.find(
+              (entry) => entry.id !== baselineHistoryId && entry.status === 'running'
+            ) || history.find((entry) => entry.id !== baselineHistoryId);
+            if (!newRun) {
+              continue;
+            }
+            if (newRun.status === 'running') {
+              trackedExecutionId = newRun.id;
+              continue;
+            }
+            this._notifyJobHistoryResult(newRun);
+            await this.loadHistory();
+            await this.pollQueueStatus();
+            return;
+          }
+
+          const tracked = history.find((entry) => entry.id === trackedExecutionId);
+          if (!tracked || tracked.status === 'running') {
+            continue;
+          }
+
+          this._notifyJobHistoryResult(tracked);
+          await this.loadHistory();
+          await this.pollQueueStatus();
+          return;
+        } catch (error) {
+          console.error('Failed to poll job history:', error);
+        }
+      }
+      this.$toast.open({
+        message: `Job ${job.name} is still running in the background`,
+        type: 'info',
+        duration: 8000
+      });
+    },
+
+    _notifyJobHistoryResult(entry) {
+      if (entry.status === 'completed') {
+        this.$toast.open({
+          message: `Job completed: ${entry.results_count || 0} found, ${entry.requested_count || 0} enqueued for Seer`,
+          type: 'success',
+          duration: 10000
+        });
+      } else if (entry.status === 'skipped') {
+        this.$toast.open({
+          message: entry.error_message || 'Job was skipped',
+          type: 'warning',
+          duration: 8000
+        });
+      } else {
+        this.$toast.open({
+          message: entry.error_message || 'Job failed',
+          type: 'error',
+          duration: 10000
+        });
       }
     },
 
@@ -877,6 +984,11 @@ export default {
 .job-type-badge.trakt_recommendations {
   background: var(--color-error-alpha-10);
   color: var(--color-error-light);
+}
+
+.job-type-badge.trakt_list {
+  background: var(--color-primary-alpha-10);
+  color: var(--color-primary-light);
 }
 
 /* Job Badges Container */

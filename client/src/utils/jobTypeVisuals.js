@@ -19,6 +19,12 @@ export const JOB_TYPE_CONFIG = {
     color: 'var(--color-error-light)',
     gradient: 'linear-gradient(135deg, var(--color-error-hover) 0%, var(--color-error) 50%, var(--color-error-light) 100%)',
   },
+  trakt_list: {
+    icon: 'icon-trakt',
+    label: 'Trakt List',
+    color: 'var(--color-info-light, var(--color-primary-light))',
+    gradient: 'linear-gradient(135deg, var(--color-info-hover) 0%, var(--color-primary) 50%, var(--color-primary-light) 100%)',
+  },
   llm_recommendation: {
     icon: 'fas fa-robot',
     label: 'LLM Recommendation',
@@ -52,6 +58,9 @@ export function getJobTypeLabel(jobType) {
   if (jobType === 'trakt_recommendations') {
     return 'Trakt';
   }
+  if (jobType === 'trakt_list') {
+    return 'Trakt List';
+  }
   return config.label;
 }
 
@@ -72,6 +81,9 @@ export function getRequestSourceVisual(source) {
   }
   if (id === 'trakt_recommendations') {
     return { ...JOB_TYPE_CONFIG.trakt_recommendations, key: 'trakt_recommendations' };
+  }
+  if (id === 'trakt_list') {
+    return { ...JOB_TYPE_CONFIG.trakt_list, key: 'trakt_list' };
   }
   if (id === '0') {
     return { ...JOB_TYPE_CONFIG.llm_recommendation, key: 'llm_recommendation' };

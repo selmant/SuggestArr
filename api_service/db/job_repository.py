@@ -605,6 +605,7 @@ class JobRepository:
 
             deleted = cursor.rowcount > 0
             if deleted:
+                self.db.clear_trakt_list_seen(job_id)
                 self.logger.info(f"Deleted discover job ID: {job_id}")
             else:
                 self.logger.warning(f"No job found with ID: {job_id}")

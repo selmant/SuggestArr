@@ -57,10 +57,31 @@
                   <span class="job-type-desc">Personalized lists from Trakt.tv</span>
                 </div>
               </button>
+              <button
+                type="button"
+                class="job-type-btn trakt_list"
+                :class="{
+                  active: form.job_type === 'trakt_list',
+                  disabled: !traktListJobAvailable
+                }"
+                :disabled="!traktListJobAvailable"
+                :title="traktListJobUnavailableReason"
+                @click="setJobType('trakt_list')"
+              >
+                <i class="icon-trakt"></i>
+                <div class="job-type-info">
+                  <span class="job-type-name">Trakt List</span>
+                  <span class="job-type-desc">Request new items from any Trakt list</span>
+                </div>
+              </button>
             </div>
-            <div v-if="!traktJobAvailable" class="trakt-setup-alert" role="status">
+            <div v-if="!traktJobAvailable && form.job_type === 'trakt_recommendations'" class="trakt-setup-alert" role="status">
               <i class="fas fa-circle-info"></i>
               <span>{{ traktJobUnavailableReason }}</span>
+            </div>
+            <div v-if="!traktListJobAvailable && form.job_type === 'trakt_list'" class="trakt-setup-alert" role="status">
+              <i class="fas fa-circle-info"></i>
+              <span>{{ traktListJobUnavailableReason }}</span>
             </div>
           </div>
 
@@ -130,6 +151,17 @@
           <div v-if="form.job_type === 'trakt_recommendations'" class="settings-group">
             <h4>Trakt User</h4>
             <TraktRecommendationFilters
+              v-model="form"
+              :show-advanced="showAdvanced"
+              :trakt-configured="traktConfigured"
+              :connected-users="connectedUsers"
+              :is-loading="traktLoading"
+            />
+          </div>
+
+          <div v-if="form.job_type === 'trakt_list'" class="settings-group">
+            <h4>Trakt List</h4>
+            <TraktListFilters
               v-model="form"
               :show-advanced="showAdvanced"
               :trakt-configured="traktConfigured"
@@ -220,6 +252,7 @@
 import JobFilters from './JobFilters.vue';
 import RecommendationFilters from './RecommendationFilters.vue';
 import TraktRecommendationFilters from './TraktRecommendationFilters.vue';
+import TraktListFilters from './TraktListFilters.vue';
 import SchedulePicker from './SchedulePicker.vue';
 import { jobsApi } from '@/api/jobsApi';
 import { listTraktMediaUsers } from '@/api/api';
@@ -233,6 +266,7 @@ export default {
     JobFilters,
     RecommendationFilters,
     TraktRecommendationFilters,
+    TraktListFilters,
     SchedulePicker
   },
   props: {
@@ -282,6 +316,15 @@ export default {
       }
       return '';
     },
+    traktListJobAvailable() {
+      return this.traktConfigured;
+    },
+    traktListJobUnavailableReason() {
+      if (!this.traktConfigured) {
+        return 'Configure Trakt app credentials in Services before creating a Trakt list job.';
+      }
+      return '';
+    },
     jobTypeInfoIcon() {
       return getJobTypeIcon(this.form.job_type);
     },
@@ -292,11 +335,15 @@ export default {
       if (this.form.job_type === 'trakt_recommendations') {
         return 'Trakt Recommendations Jobs fetch personalized movie and show lists only from a linked Trakt account.';
       }
+      if (this.form.job_type === 'trakt_list') {
+        return 'Trakt List Jobs fetch any public Trakt list or a linked user\'s private lists/watchlist and request new items.';
+      }
       return 'Recommendation Jobs find similar content based on what your users have watched on your media server or Trakt.tv.';
     },
     jobNamePlaceholder() {
       if (this.form.job_type === 'discover') return 'e.g., Popular Movies 2024';
       if (this.form.job_type === 'trakt_recommendations') return 'e.g., Weekly Trakt Picks';
+      if (this.form.job_type === 'trakt_list') return 'e.g., Horror Watchlist Sync';
       return 'e.g., Weekly Recommendations';
     },
     isValid() {
@@ -305,6 +352,14 @@ export default {
       }
       if (this.form.job_type === 'trakt_recommendations') {
         return (this.form.user_ids || []).length === 1;
+      }
+      if (this.form.job_type === 'trakt_list') {
+        const filters = this.form.filters || {};
+        if ((filters.list_source || 'public_url') === 'linked_user') {
+          if ((this.form.user_ids || []).length !== 1) return false;
+          return Boolean(filters.watchlist || filters.list_ref || filters.list_slug);
+        }
+        return Boolean(String(filters.list_url || '').trim());
       }
       return true;
     }
@@ -385,12 +440,29 @@ export default {
       if (jobType === 'trakt_recommendations' && !this.traktJobAvailable) {
         return;
       }
+      if (jobType === 'trakt_list' && !this.traktListJobAvailable) {
+        return;
+      }
       this.form.job_type = jobType;
       if (jobType === 'discover' && this.form.media_type === 'both') {
         this.form.media_type = 'movie';
       }
       if (jobType === 'discover') {
         this.form.user_ids = [];
+      }
+      if (jobType === 'trakt_list' && !this.form.filters?.list_source) {
+        this.form.filters = {
+          ...this.form.filters,
+          list_source: 'public_url',
+          dedup_mode: 'global',
+          exclude_downloaded: true,
+          exclude_requested: true
+        };
+      }
+      if (jobType === 'trakt_recommendations' || jobType === 'trakt_list') {
+        if (jobType === 'trakt_recommendations') {
+          this.form.user_ids = this.form.user_ids?.length ? this.form.user_ids : [];
+        }
       }
     },
     async handleSubmit() {
@@ -468,6 +540,10 @@ export default {
 
 .job-type-btn.trakt_recommendations > i {
   color: var(--color-error-light);
+}
+
+.job-type-btn.trakt_list > i {
+  color: var(--color-primary-light);
 }
 
 .job-type-btn.active i {
@@ -551,6 +627,10 @@ export default {
 
 .info-note.trakt_recommendations i {
   color: var(--color-error-light);
+}
+
+.info-note.trakt_list i {
+  color: var(--color-primary-light);
 }
 
 .info-note i {

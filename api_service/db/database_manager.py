@@ -321,6 +321,15 @@ class DatabaseManager:
                     PRIMARY KEY (tmdb_id, media_type)
                 )
             """,
+            'trakt_list_seen': """
+                CREATE TABLE IF NOT EXISTS trakt_list_seen (
+                    job_id INTEGER NOT NULL,
+                    tmdb_id TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (job_id, tmdb_id, media_type)
+                )
+            """,
             'integrations': """
                 CREATE TABLE IF NOT EXISTS integrations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -484,6 +493,16 @@ class DatabaseManager:
                         rationale VARCHAR(512),
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         PRIMARY KEY (tmdb_id, media_type)
+                    ) ENGINE=InnoDB
+                """
+            elif table_name == 'trakt_list_seen':
+                query = """
+                    CREATE TABLE IF NOT EXISTS trakt_list_seen (
+                        job_id INT NOT NULL,
+                        tmdb_id VARCHAR(64) NOT NULL,
+                        media_type VARCHAR(16) NOT NULL,
+                        first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (job_id, tmdb_id, media_type)
                     ) ENGINE=InnoDB
                 """
 
@@ -1641,6 +1660,52 @@ class DatabaseManager:
                 )
             else:
                 cursor.execute("DELETE FROM ai_search_seen")
+            count = cursor.rowcount
+            conn.commit()
+            return count
+
+    def get_trakt_list_seen(self, job_id: int) -> set[tuple[str, str]]:
+        """Return seen (tmdb_id, media_type) tuples for a Trakt list job."""
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT tmdb_id, media_type FROM trakt_list_seen WHERE job_id = {placeholder}",
+                (int(job_id),),
+            )
+            return {(str(row[0]), str(row[1])) for row in cursor.fetchall()}
+
+    def mark_trakt_list_seen(self, job_id: int, items) -> None:
+        """Record list items as seen for per-list dedup."""
+        if not items:
+            return
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        rows = [(int(job_id), str(tmdb_id), media_type) for tmdb_id, media_type in items if tmdb_id]
+        if not rows:
+            return
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if self.db_type in ('mysql', 'mariadb'):
+                cursor.executemany(
+                    f"REPLACE INTO trakt_list_seen (job_id, tmdb_id, media_type) VALUES ({placeholder}, {placeholder}, {placeholder})",
+                    rows,
+                )
+            else:
+                cursor.executemany(
+                    f"INSERT INTO trakt_list_seen (job_id, tmdb_id, media_type) VALUES ({placeholder}, {placeholder}, {placeholder}) ON CONFLICT(job_id, tmdb_id, media_type) DO NOTHING",
+                    rows,
+                )
+            conn.commit()
+
+    def clear_trakt_list_seen(self, job_id: int) -> int:
+        """Delete per-list seen rows for a job."""
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"DELETE FROM trakt_list_seen WHERE job_id = {placeholder}",
+                (int(job_id),),
+            )
             count = cursor.rowcount
             conn.commit()
             return count

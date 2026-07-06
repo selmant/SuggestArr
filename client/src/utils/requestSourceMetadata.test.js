@@ -17,6 +17,11 @@ test('getRequestMethodMetadata resolves real automation methods', () => {
     shortLabel: 'Trakt',
     icon: 'icon-trakt',
   });
+  assert.deepEqual(getRequestMethodMetadata({ source_id: 'trakt_list' }), {
+    label: 'Trakt List',
+    shortLabel: 'Trakt List',
+    icon: 'icon-trakt',
+  });
   assert.deepEqual(getRequestMethodMetadata({ source_id: 'ai_search' }), {
     label: 'AI Search',
     shortLabel: 'AI',
@@ -42,8 +47,8 @@ test('getRequestSourceContentMetadata describes TMDb-backed source content', () 
 
 test('getRequestSourceContentMetadata hides synthetic source content rows', () => {
   assert.equal(getRequestSourceContentMetadata({
-    source_id: 'trakt_recommendations',
-    source_title: 'Trakt Recommendations',
+    source_id: 'trakt_list',
+    source_title: 'Trakt List',
   }), null);
   assert.equal(getRequestSourceContentMetadata({
     source_id: 'discover',

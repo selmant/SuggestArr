@@ -169,8 +169,8 @@ async def test_initialize_components_skips_seer_cache_sync_in_dry_run():
     automation._build_trakt_client = MagicMock(return_value=MagicMock())
 
     with (
-        patch("api_service.jobs.trakt_recommendations_automation.SeerClient") as seer_cls,
-        patch("api_service.jobs.trakt_recommendations_automation.TMDbClient"),
+        patch("api_service.jobs._trakt_automation_base.SeerClient") as seer_cls,
+        patch("api_service.jobs._trakt_automation_base.TMDbClient"),
     ):
         seer = seer_cls.return_value
         seer.init = AsyncMock()
