@@ -12,6 +12,60 @@ from api_service.config.logger_manager import LoggerManager
 HTTP_OK = {200, 201}
 
 
+def _parse_int_rating(value) -> int | None:
+    """Parse a numeric rating from OMDb strings like '87%' or '74/100'."""
+    if value in (None, '', 'N/A'):
+        return None
+    text = str(value).strip()
+    if '/' in text:
+        text = text.split('/', 1)[0]
+    text = text.rstrip('%').strip()
+    try:
+        return int(float(text))
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_omdb_ratings(data: dict) -> dict:
+    """Extract IMDB, Rotten Tomatoes, and Metacritic ratings from an OMDb payload."""
+    raw_rating = data.get('imdbRating')
+    raw_votes = data.get('imdbVotes')
+    rating_missing = raw_rating in (None, '', 'N/A')
+    votes_missing = raw_votes in (None, '', 'N/A')
+
+    imdb_votes = None
+    if not votes_missing:
+        try:
+            imdb_votes = int(str(raw_votes).replace(',', ''))
+        except (ValueError, TypeError):
+            imdb_votes = None
+
+    imdb_rating = None
+    if not rating_missing:
+        try:
+            imdb_rating = float(raw_rating)
+        except (ValueError, TypeError):
+            imdb_rating = None
+
+    rt_rating = None
+    metacritic_rating = _parse_int_rating(data.get('Metascore'))
+    for entry in data.get('Ratings') or []:
+        source = (entry or {}).get('Source')
+        value = (entry or {}).get('Value')
+        if source == 'Rotten Tomatoes':
+            rt_rating = _parse_int_rating(value)
+        elif source == 'Metacritic' and metacritic_rating is None:
+            metacritic_rating = _parse_int_rating(value)
+
+    return {
+        'imdb_rating': imdb_rating,
+        'imdb_votes': imdb_votes,
+        'imdb_rating_raw': raw_rating,
+        'rt_rating': rt_rating,
+        'metacritic_rating': metacritic_rating,
+    }
+
+
 class OmdbClient(BaseHTTPClient):
     """
     Client for interacting with the OMDb API to retrieve IMDB ratings.
@@ -40,9 +94,8 @@ class OmdbClient(BaseHTTPClient):
             imdb_id (str): IMDB ID in tt... format (e.g., 'tt0816692').
 
         Returns:
-            dict | None: Dictionary with 'imdb_rating' (float) and
-                         'imdb_votes' (int), or None if unavailable or
-                         the request fails.
+            dict | None: Dictionary with imdb/rt/metacritic ratings and vote
+                         counts, or None if unavailable or the request fails.
         """
         if not imdb_id or not self.api_key:
             return None
@@ -61,56 +114,23 @@ class OmdbClient(BaseHTTPClient):
                                           imdb_id, data.get('Error'))
                         return None
 
-                    raw_rating = data.get('imdbRating')
-                    raw_votes = data.get('imdbVotes')
-
-                    rating_missing = raw_rating in (None, '', 'N/A')
-                    votes_missing = raw_votes in (None, '', 'N/A')
-
-                    imdb_votes = None
-                    if not votes_missing:
-                        try:
-                            imdb_votes = int(str(raw_votes).replace(',', ''))
-                        except (ValueError, TypeError) as e:
-                            self.logger.warning(
-                                "Failed to parse IMDB votes for %s: %s", imdb_id, str(e)
-                            )
-
-                    if rating_missing:
+                    parsed = _parse_omdb_ratings(data)
+                    if parsed['imdb_rating'] is None:
                         self.logger.debug(
                             "No valid IMDB rating for IMDB ID %s (imdbRating=%s, imdbVotes=%s)",
                             imdb_id,
-                            raw_rating,
-                            raw_votes,
+                            parsed['imdb_rating_raw'],
+                            parsed['imdb_votes'],
                         )
-                        return {
-                            'imdb_rating': None,
-                            'imdb_votes': imdb_votes,
-                            'imdb_rating_raw': raw_rating,
-                        }
-
-                    try:
-                        imdb_rating = float(raw_rating)
+                    else:
                         self.logger.debug(
-                            "IMDB rating for %s: %.1f (%s votes)",
+                            "OMDb ratings for %s: IMDB %.1f, RT %s, Metacritic %s",
                             imdb_id,
-                            imdb_rating,
-                            imdb_votes if imdb_votes is not None else 'unknown',
+                            parsed['imdb_rating'],
+                            parsed['rt_rating'],
+                            parsed['metacritic_rating'],
                         )
-                        return {
-                            'imdb_rating': imdb_rating,
-                            'imdb_votes': imdb_votes,
-                            'imdb_rating_raw': raw_rating,
-                        }
-                    except (ValueError, TypeError) as e:
-                        self.logger.warning(
-                            "Failed to parse IMDB rating data for %s: %s", imdb_id, str(e)
-                        )
-                        return {
-                            'imdb_rating': None,
-                            'imdb_votes': imdb_votes,
-                            'imdb_rating_raw': raw_rating,
-                        }
+                    return parsed
                 else:
                     self.logger.warning("OMDb request failed for IMDB ID %s: HTTP %d",
                                         imdb_id, response.status)

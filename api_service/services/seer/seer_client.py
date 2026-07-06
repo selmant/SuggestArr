@@ -429,14 +429,22 @@ class SeerClient(BaseHTTPClient):
         # Persist metadata immediately while the full objects are available in memory,
         # so the payload stored in the queue table stays compact (no large text blobs).
         try:
-            db.save_metadata(media, media_type)
+            from api_service.services.ratings.enrichment import enrich_and_save_metadata
+            await enrich_and_save_metadata(media, media_type, db)
         except Exception:
-            pass  # non-critical — metadata is display-only cache
-        if source and is_tmdb_metadata_source_id(source.get("id")):
             try:
-                db.save_metadata(source, media_type)
+                db.save_metadata(media, media_type)
             except Exception:
                 pass
+        if source and is_tmdb_metadata_source_id(source.get("id")):
+            try:
+                from api_service.services.ratings.enrichment import enrich_and_save_metadata
+                await enrich_and_save_metadata(source, media_type, db)
+            except Exception:
+                try:
+                    db.save_metadata(source, media_type)
+                except Exception:
+                    pass
 
         enqueued = db.enqueue_request(tmdb_id, media_type, user_id, payload)
         if enqueued:

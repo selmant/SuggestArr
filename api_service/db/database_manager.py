@@ -226,6 +226,14 @@ class DatabaseManager:
                     genre_ids TEXT,
                     logo_path TEXT,
                     backdrop_path TEXT,
+                    imdb_id TEXT,
+                    imdb_rating REAL,
+                    imdb_votes INTEGER,
+                    rt_rating INTEGER,
+                    metacritic_rating INTEGER,
+                    trakt_rating REAL,
+                    trakt_votes INTEGER,
+                    ratings_updated_at TIMESTAMP,
                     UNIQUE(media_id, media_type)
                 )
             """,
@@ -625,6 +633,9 @@ class DatabaseManager:
         # Check and add missing columns to discover_jobs table
         self._migrate_discover_jobs_table()
 
+        # Check and add missing columns to metadata table
+        self._migrate_metadata_table()
+
         # Migrate 'viewer' role to 'user' for all existing accounts
         self._migrate_viewer_role_to_user()
 
@@ -796,6 +807,77 @@ class DatabaseManager:
             except Exception as e:
                 self.logger.error(f"Failed to migrate discover_jobs table: {e}")
                 # Don't raise - table might not exist yet
+
+    def _migrate_metadata_table(self):
+        """Add missing rating columns to metadata table for multi-source badges."""
+        self.logger.debug("Checking for missing columns in metadata table...")
+
+        column_defs = {
+            'imdb_id': 'TEXT',
+            'imdb_rating': 'REAL',
+            'imdb_votes': 'INTEGER',
+            'rt_rating': 'INTEGER',
+            'metacritic_rating': 'INTEGER',
+            'trakt_rating': 'REAL',
+            'trakt_votes': 'INTEGER',
+            'ratings_updated_at': 'TIMESTAMP',
+        }
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            try:
+                if self.db_type == 'sqlite':
+                    cursor.execute("PRAGMA table_info(metadata);")
+                    existing_columns = {row[1] for row in cursor.fetchall()}
+                elif self.db_type == 'postgres':
+                    cursor.execute(
+                        """
+                        SELECT column_name FROM information_schema.columns
+                        WHERE table_name = 'metadata';
+                        """
+                    )
+                    existing_columns = {row[0] for row in cursor.fetchall()}
+                elif self.db_type in ['mysql', 'mariadb']:
+                    cursor.execute("SHOW COLUMNS FROM metadata;")
+                    existing_columns = {row[0] for row in cursor.fetchall()}
+                else:
+                    self.logger.warning(f"Unsupported DB type for column check: {self.db_type}")
+                    return
+
+                for column_name, column_type in column_defs.items():
+                    if column_name in existing_columns:
+                        continue
+                    self.logger.info("Adding column %s to metadata...", column_name)
+                    cursor.execute(
+                        f"ALTER TABLE metadata ADD COLUMN {column_name} {column_type};"
+                    )
+                    conn.commit()
+            except Exception as e:
+                self.logger.error(f"Failed to migrate metadata table: {e}")
+
+    @staticmethod
+    def _metadata_ratings_payload(
+        imdb_id=None,
+        imdb_rating=None,
+        imdb_votes=None,
+        rt_rating=None,
+        metacritic_rating=None,
+        trakt_rating=None,
+        trakt_votes=None,
+        ratings_updated_at=None,
+    ) -> Dict[str, Any]:
+        """Build a normalized ratings dict for API responses."""
+        return {
+            "imdb_id": imdb_id,
+            "imdb_rating": round(imdb_rating, 1) if imdb_rating is not None else None,
+            "imdb_votes": imdb_votes,
+            "rt_rating": rt_rating,
+            "metacritic_rating": metacritic_rating,
+            "trakt_rating": round(trakt_rating, 1) if trakt_rating is not None else None,
+            "trakt_votes": trakt_votes,
+            "ratings_updated_at": ratings_updated_at,
+        }
 
     # ------------------------------------------------------------------
     # Integrations helpers
@@ -1193,14 +1275,29 @@ class DatabaseManager:
         genre_ids = ','.join(map(str, media.get('genre_ids', [])))
         logo_path = media.get('logo_path', '')
         backdrop_path = media.get('backdrop_path', '')
+        imdb_id = media.get('imdb_id')
+        imdb_rating = media.get('imdb_rating')
+        imdb_votes = media.get('imdb_votes')
+        rt_rating = media.get('rt_rating')
+        metacritic_rating = media.get('metacritic_rating')
+        trakt_rating = media.get('trakt_rating')
+        trakt_votes = media.get('trakt_votes')
+        ratings_updated_at = media.get('ratings_updated_at')
 
         query = """
-            INSERT OR IGNORE INTO metadata (media_id, media_type, title, overview, release_date, 
-                                             poster_path, rating, votes, origin_country, genre_ids, logo_path, backdrop_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO metadata (media_id, media_type, title, overview, release_date,
+                                             poster_path, rating, votes, origin_country, genre_ids,
+                                             logo_path, backdrop_path, imdb_id, imdb_rating, imdb_votes,
+                                             rt_rating, metacritic_rating, trakt_rating, trakt_votes,
+                                             ratings_updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        params = (media_id, media_type, title, overview, release_date, poster_path, 
-                 rating, votes, origin_country, genre_ids, logo_path, backdrop_path)
+        params = (
+            media_id, media_type, title, overview, release_date, poster_path,
+            rating, votes, origin_country, genre_ids, logo_path, backdrop_path,
+            imdb_id, imdb_rating, imdb_votes, rt_rating, metacritic_rating,
+            trakt_rating, trakt_votes, ratings_updated_at,
+        )
         
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -1215,6 +1312,95 @@ class DatabaseManager:
                 query = query.replace("?", "%s")
             
             cursor.execute(query, params)
+            conn.commit()
+
+    def get_metadata_ratings(self, media_id: str, media_type: str) -> Optional[Dict[str, Any]]:
+        """Return persisted multi-source ratings for a metadata row."""
+        query = """
+            SELECT imdb_id, imdb_rating, imdb_votes, rt_rating, metacritic_rating,
+                   trakt_rating, trakt_votes, ratings_updated_at
+            FROM metadata
+            WHERE media_id = ? AND media_type = ?
+        """
+        params = (media_id, media_type)
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if self.db_type in ['mysql', 'postgres']:
+                query = query.replace("?", "%s")
+            cursor.execute(query, params)
+            result = cursor.fetchone()
+
+        if not result:
+            return None
+
+        return self._metadata_ratings_payload(
+            imdb_id=result[0],
+            imdb_rating=result[1],
+            imdb_votes=result[2],
+            rt_rating=result[3],
+            metacritic_rating=result[4],
+            trakt_rating=result[5],
+            trakt_votes=result[6],
+            ratings_updated_at=result[7],
+        )
+
+    def update_metadata_ratings(self, media_id: str, media_type: str, ratings: Dict[str, Any]) -> None:
+        """Upsert multi-source ratings for an existing metadata row."""
+        now = datetime.now(timezone.utc)
+        query = """
+            UPDATE metadata
+            SET imdb_id = ?,
+                imdb_rating = ?,
+                imdb_votes = ?,
+                rt_rating = ?,
+                metacritic_rating = ?,
+                trakt_rating = ?,
+                trakt_votes = ?,
+                ratings_updated_at = ?
+            WHERE media_id = ? AND media_type = ?
+        """
+        params = (
+            ratings.get('imdb_id'),
+            ratings.get('imdb_rating'),
+            ratings.get('imdb_votes'),
+            ratings.get('rt_rating'),
+            ratings.get('metacritic_rating'),
+            ratings.get('trakt_rating'),
+            ratings.get('trakt_votes'),
+            ratings.get('ratings_updated_at', now),
+            media_id,
+            media_type,
+        )
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if self.db_type in ['mysql', 'postgres']:
+                query = query.replace("?", "%s")
+            cursor.execute(query, params)
+            if cursor.rowcount == 0:
+                insert_query = """
+                    INSERT INTO metadata (
+                        media_id, media_type, title, imdb_id, imdb_rating, imdb_votes,
+                        rt_rating, metacritic_rating, trakt_rating, trakt_votes, ratings_updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                insert_params = (
+                    media_id,
+                    media_type,
+                    ratings.get('title') or f"TMDb {media_id}",
+                    ratings.get('imdb_id'),
+                    ratings.get('imdb_rating'),
+                    ratings.get('imdb_votes'),
+                    ratings.get('rt_rating'),
+                    ratings.get('metacritic_rating'),
+                    ratings.get('trakt_rating'),
+                    ratings.get('trakt_votes'),
+                    ratings.get('ratings_updated_at', now),
+                )
+                if self.db_type in ['mysql', 'postgres']:
+                    insert_query = insert_query.replace("?", "%s")
+                cursor.execute(insert_query, insert_params)
             conn.commit()
     
     def get_metadata(self, media_id: str, media_type: str) -> Optional[Dict[str, Any]]:
@@ -1306,9 +1492,15 @@ class DatabaseManager:
                 {source_title_expr} AS source_title,
                 s.overview AS source_overview,
                 s.release_date AS source_release_date, s.poster_path AS source_poster_path, s.rating as rating,
+                s.imdb_id AS source_imdb_id, s.imdb_rating AS source_imdb_rating, s.imdb_votes AS source_imdb_votes,
+                s.rt_rating AS source_rt_rating, s.metacritic_rating AS source_metacritic_rating,
+                s.trakt_rating AS source_trakt_rating, s.trakt_votes AS source_trakt_votes,
                 r.tmdb_request_id, r.media_type, r.requested_at, s.logo_path, s.backdrop_path,
                 m.title AS request_title, m.overview AS request_overview,
                 m.release_date AS request_release_date, m.poster_path AS request_poster_path, m.rating as request_rating,
+                m.imdb_id AS request_imdb_id, m.imdb_rating AS request_imdb_rating, m.imdb_votes AS request_imdb_votes,
+                m.rt_rating AS request_rt_rating, m.metacritic_rating AS request_metacritic_rating,
+                m.trakt_rating AS request_trakt_rating, m.trakt_votes AS request_trakt_votes,
                 m.logo_path, m.backdrop_path, r.is_anime, r.rationale,
                 r.user_id, u.user_name, r.source_origin
             FROM requests r
@@ -1334,7 +1526,25 @@ class DatabaseManager:
         
         for row in result:
             source_id = row[0]
-            requested_at = row[8]
+            requested_at = row[15]
+            source_ratings = self._metadata_ratings_payload(
+                imdb_id=row[6],
+                imdb_rating=row[7],
+                imdb_votes=row[8],
+                rt_rating=row[9],
+                metacritic_rating=row[10],
+                trakt_rating=row[11],
+                trakt_votes=row[12],
+            )
+            request_ratings = self._metadata_ratings_payload(
+                imdb_id=row[23],
+                imdb_rating=row[24],
+                imdb_votes=row[25],
+                rt_rating=row[26],
+                metacritic_rating=row[27],
+                trakt_rating=row[28],
+                trakt_votes=row[29],
+            )
             
             if source_id not in sources:
                 sources[source_id] = {
@@ -1344,10 +1554,11 @@ class DatabaseManager:
                     "source_release_date": row[3],
                     "source_poster_path": row[4],
                     "rating": round(row[5], 2) if row[5] is not None else None,
-                    "media_type": row[7],
-                    "logo_path": row[9],
-                    "backdrop_path": row[10],
-                    "is_anime": bool(row[18]) if len(row) > 18 and row[18] is not None else False,
+                    **{k: v for k, v in source_ratings.items() if k != 'ratings_updated_at'},
+                    "media_type": row[14],
+                    "logo_path": row[16],
+                    "backdrop_path": row[17],
+                    "is_anime": bool(row[32]) if len(row) > 32 and row[32] is not None else False,
                     "requests": []
                 }
                 source_max_dates[source_id] = requested_at
@@ -1356,20 +1567,21 @@ class DatabaseManager:
                     source_max_dates[source_id] = requested_at
 
             sources[source_id]["requests"].append({
-                "request_id": row[6],
-                "media_type": row[7],
-                "requested_at": row[8],
-                "title": row[11],
-                "overview": row[12],
-                "release_date": row[13],
-                "poster_path": row[14],
-                "backdrop_path": row[17],
-                "rating": round(row[15], 2) if row[15] is not None else None,
-                "logo_path": row[16],
-                "rationale": row[19] if len(row) > 19 else None,
-                "user_id": row[20] if len(row) > 20 else None,
-                "user_name": row[21] if len(row) > 21 else None,
-                "source_origin": row[22] if len(row) > 22 else None,
+                "request_id": row[13],
+                "media_type": row[14],
+                "requested_at": row[15],
+                "title": row[18],
+                "overview": row[19],
+                "release_date": row[20],
+                "poster_path": row[21],
+                "backdrop_path": row[31],
+                "rating": round(row[22], 2) if row[22] is not None else None,
+                **{k: v for k, v in request_ratings.items() if k != 'ratings_updated_at'},
+                "logo_path": row[30],
+                "rationale": row[33] if len(row) > 33 else None,
+                "user_id": row[34] if len(row) > 34 else None,
+                "user_name": row[35] if len(row) > 35 else None,
+                "source_origin": row[36] if len(row) > 36 else None,
             })
     
         # Sort sources
@@ -1741,7 +1953,9 @@ class DatabaseManager:
             SELECT
                 r.tmdb_request_id, r.media_type, r.requested_at, r.rationale,
                 m.title, m.overview, m.poster_path, m.release_date, m.rating,
-                m.backdrop_path, m.logo_path
+                m.backdrop_path, m.logo_path,
+                m.imdb_id, m.imdb_rating, m.imdb_votes, m.rt_rating, m.metacritic_rating,
+                m.trakt_rating, m.trakt_votes
             FROM requests r
             JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
             WHERE r.requested_by = 'SuggestArr'
@@ -1774,6 +1988,19 @@ class DatabaseManager:
                 "rating": round(row[8], 2) if row[8] is not None else None,
                 "backdrop_path": row[9],
                 "logo_path": row[10],
+                **{
+                    k: v
+                    for k, v in self._metadata_ratings_payload(
+                        imdb_id=row[11],
+                        imdb_rating=row[12],
+                        imdb_votes=row[13],
+                        rt_rating=row[14],
+                        metacritic_rating=row[15],
+                        trakt_rating=row[16],
+                        trakt_votes=row[17],
+                    ).items()
+                    if k != 'ratings_updated_at'
+                },
             })
 
         total_pages = max(1, (total + per_page - 1) // per_page)

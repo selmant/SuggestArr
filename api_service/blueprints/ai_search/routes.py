@@ -171,7 +171,8 @@ async def ai_search_request():
                     # title and poster are stored correctly in the local DB.
                     media_dict = {"id": str(tmdb_id)}
                     media_dict.update(metadata)
-                    db.save_metadata(media_dict, media_type)
+                    from api_service.services.ratings.enrichment import enrich_and_save_metadata
+                    await enrich_and_save_metadata(media_dict, media_type, db)
                     # Tag with 'ai_search' source to keep these requests out of the
                     # "By Watched Content" view in the dashboard.
                     db.save_request(

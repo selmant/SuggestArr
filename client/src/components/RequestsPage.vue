@@ -235,6 +235,7 @@
                 v-for="item in filteredAiRequests"
                 :key="item.request_id"
                 :item="item"
+                :badge-settings="ratingBadgeSettings"
                 source-mode="ai"
                 placeholder-icon="fas fa-magic"
                 :show-missing-rating="false"
@@ -256,6 +257,8 @@
                 v-for="request in filteredAndSortedRequests" 
                 :key="request.request_id"
                 :item="request"
+                :badge-settings="ratingBadgeSettings"
+                :trakt-user-rating="getTraktStatus(request)?.rating"
                 v-bind="{ ...posterTraktProps(request), ...posterSeerProps(request) }"
                 @set-trakt-watched="setTraktWatchedFor(request, $event)"
                 @rate-trakt="rateRequestOnTraktFor(request, $event)"
@@ -320,6 +323,7 @@
         :get-seer-status="getSeerStatus"
         :get-seer-inline-label="getSeerInlineLabel"
         :is-seer-busy="isSeerBusy"
+        :badge-settings="ratingBadgeSettings"
         @close="closeModal"
         @select-related="openModal"
         @set-trakt-watched="setTraktWatchedForSource(selectedSource, $event)"
@@ -347,6 +351,7 @@ import RequestDetailsModal from '@/components/common/RequestDetailsModal.vue';
 import { formatDate } from '@/utils/dateUtils.js';
 import { SEER_STATUS_FILTER_OPTIONS } from '@/utils/seerStatus.js';
 import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
+import { getRatingBadgeSettings } from '@/utils/ratingBadgeConfig.js';
 import {
   getAiSearchRequests,
 } from '@/api/api.js';
@@ -437,6 +442,10 @@ export default {
 
     totalSources() {
       return this.totalSourcesCount || this.sources.length;
+    },
+
+    ratingBadgeSettings() {
+      return getRatingBadgeSettings(this.config);
     },
 
     allRequestsFlat() {
@@ -559,6 +568,44 @@ export default {
     },
   },
   methods: {
+    mapRequestRatings(request) {
+      return {
+        request_id: request.request_id,
+        title: request.title,
+        media_type: request.media_type,
+        requested_at: request.requested_at,
+        overview: request.overview,
+        poster_path: request.poster_path,
+        release_date: request.release_date,
+        rating: request.rating,
+        imdb_id: request.imdb_id,
+        imdb_rating: request.imdb_rating,
+        imdb_votes: request.imdb_votes,
+        rt_rating: request.rt_rating,
+        metacritic_rating: request.metacritic_rating,
+        trakt_rating: request.trakt_rating,
+        trakt_votes: request.trakt_votes,
+        logo_path: request.logo_path,
+        backdrop_path: request.backdrop_path,
+        rationale: request.rationale,
+        user_id: request.user_id,
+        user_name: request.user_name,
+        source_origin: request.source_origin,
+      };
+    },
+
+    mapSourceRatings(sourceData) {
+      return {
+        imdb_id: sourceData.imdb_id,
+        imdb_rating: sourceData.imdb_rating,
+        imdb_votes: sourceData.imdb_votes,
+        rt_rating: sourceData.rt_rating,
+        metacritic_rating: sourceData.metacritic_rating,
+        trakt_rating: sourceData.trakt_rating,
+        trakt_votes: sourceData.trakt_votes,
+      };
+    },
+
     formatDate,
 
     filterRequestList(requests) {
@@ -757,6 +804,7 @@ export default {
           overview: sourceData.source_overview,
           poster_path: sourceData.source_poster_path,
           rating: sourceData.rating,
+          ...this.mapSourceRatings(sourceData),
           media_type: sourceData.media_type,
           showRequests: false,
           logo_path: sourceData.logo_path,
@@ -765,22 +813,7 @@ export default {
             id: sourceData.source_id,
             title: sourceData.source_title,
           }),
-          requests: sourceData.requests.map((request) => ({
-            request_id: request.request_id,
-            title: request.title,
-            media_type: request.media_type,
-            requested_at: request.requested_at,
-            overview: request.overview,
-            poster_path: request.poster_path,
-            release_date: request.release_date,
-            rating: request.rating,
-            logo_path: request.logo_path,
-            backdrop_path: request.backdrop_path,
-            rationale: request.rationale,
-            user_id: request.user_id,
-            user_name: request.user_name,
-            source_origin: request.source_origin,
-          })),
+          requests: sourceData.requests.map((request) => this.mapRequestRatings(request)),
         }));
 
         this.sources = [...this.sources, ...newSources];

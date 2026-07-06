@@ -343,7 +343,8 @@ class DiscoverAutomation:
                 'genre_ids': item.get('genre_ids', []),
                 'backdrop_path': item.get('backdrop_path', ''),
             }
-            self.db_manager.save_metadata(metadata, media_type)
+            from api_service.services.ratings.enrichment import enrich_and_save_metadata
+            await enrich_and_save_metadata(metadata, media_type, self.db_manager)
         except Exception as e:
             self.logger.warning(f"Failed to save metadata for {item.get('title')}: {str(e)}")
 

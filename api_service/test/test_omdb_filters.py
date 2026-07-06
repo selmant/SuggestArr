@@ -102,6 +102,35 @@ class TestOmdbClientGetRating(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(result['imdb_rating'], 8.8)
         self.assertEqual(result['imdb_votes'], 2_400_000)
 
+    async def test_parses_rotten_tomatoes_and_metacritic(self):
+        payload = {
+            'Response': 'True',
+            'imdbRating': '8.8',
+            'imdbVotes': '2,400,000',
+            'Metascore': '74',
+            'Ratings': [
+                {'Source': 'Internet Movie Database', 'Value': '8.8/10'},
+                {'Source': 'Rotten Tomatoes', 'Value': '87%'},
+                {'Source': 'Metacritic', 'Value': '74/100'},
+            ],
+        }
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=payload)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch('aiohttp.ClientSession', return_value=mock_session):
+            result = await self.client.get_rating('tt0816692')
+
+        self.assertEqual(result['rt_rating'], 87)
+        self.assertEqual(result['metacritic_rating'], 74)
+
     # --- OMDb Response == False ---
 
     async def test_returns_none_when_omdb_response_false(self):

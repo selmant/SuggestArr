@@ -34,7 +34,7 @@ test('request details modal renders Trakt actions for selected and related reque
   assert.doesNotMatch(requestPosterCardSource, /item\.media_type\.charAt\(0\)\.toUpperCase\(\)/);
   assert.match(detailsModalSource, /request-details-modal__context-row--trakt/);
   assert.match(detailsModalSource, /Media type <strong>/);
-  assert.match(detailsModalSource, /Audience rating <strong>/);
+  assert.match(detailsModalSource, /RatingBadges/);
   assert.match(detailsModalSource, /Trakt status <strong>/);
   assert.match(detailsModalSource, /traktStatusLabel/);
   assert.match(traktRequestActionsCss, /\.trakt-action-strip--modal/);

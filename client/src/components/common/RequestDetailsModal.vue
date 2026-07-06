@@ -27,10 +27,11 @@
                     <i :class="selectedSource.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
                     {{ selectedSource.media_type.toUpperCase() }}
                   </span>
-                  <span v-if="selectedSource.rating" class="request-details-modal__poster-pill request-details-modal__poster-pill--rating">
-                    <i class="fas fa-star"></i>
-                    {{ selectedSource.rating }}
-                  </span>
+                  <RatingBadges
+                    class="request-details-modal__rating-badges"
+                    :item="selectedSource"
+                    :badge-settings="badgeSettings"
+                    :trakt-user-rating="modalTraktUserRating" />
                 </div>
 
                 <div v-if="posterDateLabel" class="request-details-modal__poster-overlay request-details-modal__poster-overlay--bottom">
@@ -140,9 +141,14 @@
                   <i :class="selectedSource.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
                   <span>Media type <strong>{{ mediaTypeLabel }}</strong></span>
                 </div>
-                <div v-if="selectedSource.rating" class="request-details-modal__context-row">
+                <div v-if="selectedSource.rating || hasExtraRatings" class="request-details-modal__context-row">
                   <i class="fas fa-star"></i>
-                  <span>Audience rating <strong>{{ selectedSource.rating }}</strong></span>
+                  <span>Ratings
+                    <RatingBadges
+                      :item="selectedSource"
+                      :badge-settings="badgeSettings"
+                      :trakt-user-rating="modalTraktUserRating" />
+                  </span>
                 </div>
                 <div v-if="traktModalTarget" class="request-details-modal__context-row request-details-modal__context-row--trakt">
                   <i class="icon-trakt"></i>
@@ -279,11 +285,14 @@ import {
   getRequestSourceContentMetadata,
 } from '@/utils/requestSourceMetadata.js';
 import TraktStarRating from '@/components/common/TraktStarRating.vue';
+import RatingBadges from '@/components/common/RatingBadges.vue';
+import { DEFAULT_RATING_BADGE_SETTINGS } from '@/utils/ratingBadgeConfig.js';
 
 export default {
   name: 'RequestDetailsModal',
   components: {
     TraktStarRating,
+    RatingBadges,
   },
   props: {
     show: {
@@ -378,6 +387,10 @@ export default {
       type: Function,
       default: () => false,
     },
+    badgeSettings: {
+      type: Object,
+      default: () => ({ ...DEFAULT_RATING_BADGE_SETTINGS }),
+    },
   },
   emits: [
     'close',
@@ -406,11 +419,25 @@ export default {
         (this.selectedSource?.release_date && this.selectedSource?.requested_at) ||
         this.mediaTypeLabel ||
         this.selectedSource?.rating ||
+        this.hasExtraRatings ||
         this.traktModalTarget ||
         this.selectedSource?.source_origin === 'trakt_history' ||
         this.sourceContentMetadata ||
         this.selectedSource?.user_name
       );
+    },
+    hasExtraRatings() {
+      const source = this.selectedSource || {};
+      return [
+        source.imdb_rating,
+        source.rt_rating,
+        source.metacritic_rating,
+        source.trakt_rating,
+        this.modalTraktUserRating,
+      ].some(value => value != null && value !== '');
+    },
+    modalTraktUserRating() {
+      return this.traktStatus?.rating ?? null;
     },
     sourceContentMetadata() {
       return getRequestSourceContentMetadata(this.selectedSource);
@@ -622,6 +649,17 @@ export default {
   background-color: var(--color-primary-alpha-20);
   border-color: var(--color-primary-alpha-20);
   color: var(--color-primary-light);
+}
+
+.request-details-modal__rating-badges {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.request-details-modal__context-row .rating-badges {
+  display: inline-flex;
+  margin-left: var(--spacing-xs);
+  vertical-align: middle;
 }
 
 .request-details-modal__poster-pill--rating {

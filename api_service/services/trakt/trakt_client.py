@@ -243,6 +243,24 @@ class TraktClient(BaseHTTPClient):
         rating = payload.get("rating")
         return int(rating) if rating is not None else None
 
+    async def get_community_rating(self, media_type: str, tmdb_id: str) -> Optional[dict[str, Any]]:
+        """Return Trakt community rating and vote count for a TMDb item."""
+        if media_type not in ("movie", "tv"):
+            return None
+
+        _, trakt_id = await self._resolve_trakt_item(media_type, str(tmdb_id))
+        path = f"/movies/{trakt_id}/ratings" if media_type == "movie" else f"/shows/{trakt_id}/ratings"
+        payload = await self._request_optional("GET", path, authenticated=False)
+        if not payload:
+            return None
+
+        rating = payload.get("rating")
+        votes = payload.get("votes")
+        return {
+            "trakt_rating": float(rating) if rating is not None else None,
+            "trakt_votes": int(votes) if votes is not None else None,
+        }
+
     async def _request_optional(
         self,
         method: str,

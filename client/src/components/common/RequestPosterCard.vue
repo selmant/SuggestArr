@@ -16,10 +16,12 @@
           <i :class="item.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
           {{ mediaTypeLabel }}
         </span>
-        <span v-if="showRating" class="poster-pill poster-pill--rating">
-          <i class="fas fa-star"></i>
-          {{ item.rating || 'N/A' }}
-        </span>
+        <RatingBadges
+          class="poster-rating-badges"
+          :item="item"
+          :badge-settings="badgeSettings"
+          :trakt-user-rating="traktUserRating"
+          :compact="compact" />
       </div>
 
       <div class="poster-overlay poster-overlay--bottom">
@@ -130,11 +132,14 @@ import {
   getRequestSourceContentMetadata,
 } from '@/utils/requestSourceMetadata.js';
 import TraktStarRating from '@/components/common/TraktStarRating.vue';
+import RatingBadges from '@/components/common/RatingBadges.vue';
+import { DEFAULT_RATING_BADGE_SETTINGS } from '@/utils/ratingBadgeConfig.js';
 
 export default {
   name: 'RequestPosterCard',
   components: {
     TraktStarRating,
+    RatingBadges,
   },
   props: {
     item: {
@@ -152,6 +157,14 @@ export default {
     showMissingRating: {
       type: Boolean,
       default: true,
+    },
+    badgeSettings: {
+      type: Object,
+      default: () => ({ ...DEFAULT_RATING_BADGE_SETTINGS }),
+    },
+    traktUserRating: {
+      type: [Number, String],
+      default: null,
     },
     showSource: {
       type: Boolean,
@@ -377,6 +390,11 @@ export default {
   background-color: var(--color-primary-alpha-20);
   border-color: var(--color-primary-alpha-20);
   color: var(--color-primary-light);
+}
+
+.poster-rating-badges {
+  margin-left: auto;
+  justify-content: flex-end;
 }
 
 .poster-pill--rating {
