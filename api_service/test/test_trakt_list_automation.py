@@ -93,14 +93,20 @@ async def test_initialize_components_disables_global_exclude_requested_for_per_l
 @pytest.mark.asyncio
 async def test_fetch_list_items_uses_watchlist_when_configured():
     automation = TraktListAutomation()
-    automation.job_data = {"media_type": "both", "max_results": 5}
+    automation.job_data = {"media_type": "movie", "max_results": 5}
     automation.use_watchlist = True
     automation.list_user = "me"
     automation.authenticated = True
     automation.trakt_client = AsyncMock()
-    automation.trakt_client.get_watchlist_items.return_value = [
-        {"tmdb_id": "1", "title": "One", "media_type": "movie"},
-    ]
+
+    async def watchlist_side_effect(*args, **kwargs):
+        page = kwargs.get("page", 1)
+        if page == 1:
+            return [{"tmdb_id": "1", "title": "One", "media_type": "movie"}]
+        return []
+
+    automation.trakt_client.get_watchlist_items.side_effect = watchlist_side_effect
+    automation._should_skip_fetch_item = AsyncMock(return_value=False)
     automation._enrich_and_filter_item = AsyncMock(side_effect=lambda item: {
         "id": int(item["tmdb_id"]),
         "title": item["title"],
@@ -110,9 +116,54 @@ async def test_fetch_list_items_uses_watchlist_when_configured():
     results = await automation.fetch_list_items()
 
     assert len(results) == 1
-    automation.trakt_client.get_watchlist_items.assert_awaited_once_with(
+    automation.trakt_client.get_watchlist_items.assert_any_await(
         "me",
-        "both",
-        limit=15,
+        "movie",
+        limit=100,
+        page=1,
         authenticated=True,
     )
+    assert automation.trakt_client.get_watchlist_items.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_list_items_paginates_past_already_requested_items():
+    automation = TraktListAutomation()
+    automation.job_id = 7
+    automation.job_data = {
+        "media_type": "movie",
+        "max_results": 1,
+        "filters": {"dedup_mode": "global"},
+    }
+    automation.use_watchlist = False
+    automation.list_user = "sean"
+    automation.list_ref = "horror"
+    automation.authenticated = False
+    automation.trakt_client = AsyncMock()
+
+    async def get_list_items_side_effect(*args, **kwargs):
+        page = kwargs.get("page", 1)
+        if page == 1:
+            return [{"tmdb_id": "1", "title": "Old", "media_type": "movie"}]
+        if page == 2:
+            return [{"tmdb_id": "2", "title": "New", "media_type": "movie"}]
+        return []
+
+    automation.trakt_client.get_list_items.side_effect = get_list_items_side_effect
+
+    async def skip_fetch_item(media_type, tmdb_id, dedup_mode, per_list_seen):
+        return str(tmdb_id) == "1"
+
+    automation._should_skip_fetch_item = AsyncMock(side_effect=skip_fetch_item)
+    automation._enrich_and_filter_item = AsyncMock(side_effect=lambda item: {
+        "id": int(item["tmdb_id"]),
+        "title": item["title"],
+        "media_type": item["media_type"],
+    })
+
+    results = await automation.fetch_list_items()
+
+    assert len(results) == 1
+    assert results[0]["id"] == 2
+    assert automation.trakt_client.get_list_items.await_count == 2
+    automation._enrich_and_filter_item.assert_awaited_once()

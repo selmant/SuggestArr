@@ -207,6 +207,7 @@ export default {
         list_source: 'public_url',
         list_url: '',
         list_ref: '',
+        list_name: '',
         watchlist: false,
         dedup_mode: 'global',
         exclude_downloaded: true,
@@ -252,6 +253,7 @@ export default {
           list_source: newVal.filters?.list_source || 'public_url',
           list_url: newVal.filters?.list_url || '',
           list_ref: newVal.filters?.list_ref || newVal.filters?.list_slug || '',
+          list_name: newVal.filters?.list_name || '',
           watchlist: newVal.filters?.watchlist === true,
           dedup_mode: newVal.filters?.dedup_mode || 'global',
           exclude_downloaded: newVal.filters?.exclude_downloaded ?? true,
@@ -354,7 +356,8 @@ export default {
         this.resolvedList = response.data?.list || null;
         this.localFilters = {
           ...this.localFilters,
-          list_url: this.localListUrl.trim()
+          list_url: this.localListUrl.trim(),
+          list_name: this.resolvedList?.name || ''
         };
       } catch (error) {
         this.resolveError = error.response?.data?.message || 'Could not resolve Trakt list';
@@ -400,6 +403,7 @@ export default {
       this.localFilters = {
         ...this.localFilters,
         list_ref: isWatchlist ? '' : (selected?.slug || selected?.id || this.selectedListKey),
+        list_name: isWatchlist ? 'Watchlist' : (selected?.name || ''),
         watchlist: isWatchlist
       };
     }

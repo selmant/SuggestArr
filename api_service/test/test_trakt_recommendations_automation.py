@@ -20,6 +20,7 @@ async def test_fetch_trakt_recommendations_applies_max_results():
         {"tmdb_id": "2", "title": "Two", "media_type": "movie"},
         {"tmdb_id": "3", "title": "Three", "media_type": "movie"},
     ]
+    automation._should_skip_global_request = AsyncMock(return_value=False)
     automation._enrich_and_filter_item = AsyncMock(side_effect=lambda item: {
         "id": int(item["tmdb_id"]),
         "title": item["title"],
@@ -37,6 +38,40 @@ async def test_fetch_trakt_recommendations_applies_max_results():
         ignore_collected=True,
         ignore_watched=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_fetch_trakt_recommendations_skips_already_requested_before_enriching():
+    automation = TraktRecommendationsAutomation()
+    automation.job_data = {
+        "media_type": "movie",
+        "max_results": 2,
+        "filters": {"ignore_collected": True, "ignore_watched": True},
+    }
+    automation.trakt_client = AsyncMock()
+    automation.trakt_client.get_recommendations.return_value = [
+        {"tmdb_id": "1", "title": "One", "media_type": "movie"},
+        {"tmdb_id": "2", "title": "Two", "media_type": "movie"},
+        {"tmdb_id": "3", "title": "Three", "media_type": "movie"},
+    ]
+
+    async def skip_global_request(media_type, tmdb_id):
+        return str(tmdb_id) in {"1", "2"}
+
+    automation._should_skip_global_request = AsyncMock(side_effect=skip_global_request)
+    automation._enrich_and_filter_item = AsyncMock(side_effect=lambda item: {
+        "id": int(item["tmdb_id"]),
+        "title": item["title"],
+        "media_type": item["media_type"],
+        "vote_average": 8.0,
+        "vote_count": 1000,
+    })
+
+    results = await automation.fetch_trakt_recommendations()
+
+    assert len(results) == 1
+    assert results[0]["id"] == 3
+    automation._enrich_and_filter_item.assert_awaited_once()
 
 
 @pytest.mark.asyncio

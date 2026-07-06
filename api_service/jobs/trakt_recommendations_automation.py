@@ -194,6 +194,13 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
 
         filtered: List[Dict[str, Any]] = []
         for item in raw_items:
+            item_media_type = item.get("media_type") or media_type
+            tmdb_id = item.get("tmdb_id")
+            if not tmdb_id:
+                continue
+            if await self._should_skip_global_request(item_media_type, tmdb_id):
+                continue
+
             enriched = await self._enrich_and_filter_item(item)
             if enriched:
                 filtered.append(enriched)

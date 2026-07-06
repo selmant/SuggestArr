@@ -15,6 +15,9 @@ from api_service.services.request_sources import TRAKT_LIST_SOURCE
 from api_service.services.trakt.media_user_augmentor import TraktAccountResolver
 from api_service.services.trakt.trakt_client import TraktClient
 
+MAX_FETCH_PAGES = 50
+PAGE_SIZE = 100
+
 
 class TraktListAutomation(TraktJobAutomationBase):
     """Automates fetching Trakt list items and requesting new media via Seer."""
@@ -213,31 +216,66 @@ class TraktListAutomation(TraktJobAutomationBase):
         """Fetch and filter Trakt list items for the configured media types."""
         media_type = self.job_data.get("media_type", "movie")
         max_results = int(self.job_data.get("max_results") or 20)
-        fetch_limit = max(max_results * 3, max_results)
-
-        if self.use_watchlist:
-            raw_items = await self.trakt_client.get_watchlist_items(
-                self.list_user or "me",
-                media_type,
-                limit=fetch_limit,
-                authenticated=self.authenticated,
-            )
-        else:
-            raw_items = await self.trakt_client.get_list_items(
-                self.list_user,
-                self.list_ref,
-                media_type,
-                limit=fetch_limit,
-                authenticated=self.authenticated,
-            )
+        dedup_mode = str(self.job_data.get("filters", {}).get("dedup_mode") or "global").strip()
+        per_list_seen = (
+            self.db_manager.get_trakt_list_seen(self.job_id)
+            if dedup_mode == "per_list"
+            else set()
+        )
 
         filtered: List[Dict[str, Any]] = []
-        for item in raw_items:
-            enriched = await self._enrich_and_filter_item(item)
-            if enriched:
-                filtered.append(enriched)
+        collected_keys: set[tuple[str, str]] = set()
+
+        for page in range(1, MAX_FETCH_PAGES + 1):
+            if self.use_watchlist:
+                raw_items = await self.trakt_client.get_watchlist_items(
+                    self.list_user or "me",
+                    media_type,
+                    limit=PAGE_SIZE,
+                    page=page,
+                    authenticated=self.authenticated,
+                )
+            else:
+                raw_items = await self.trakt_client.get_list_items(
+                    self.list_user,
+                    self.list_ref,
+                    media_type,
+                    limit=PAGE_SIZE,
+                    page=page,
+                    authenticated=self.authenticated,
+                )
+
+            if not raw_items:
+                break
+
+            for item in raw_items:
+                item_media_type = item.get("media_type") or media_type
+                tmdb_id = item.get("tmdb_id")
+                if not tmdb_id:
+                    continue
+
+                seen_key = (str(tmdb_id), item_media_type)
+                if seen_key in collected_keys:
+                    continue
+                collected_keys.add(seen_key)
+
+                if await self._should_skip_fetch_item(
+                    item_media_type,
+                    tmdb_id,
+                    dedup_mode,
+                    per_list_seen,
+                ):
+                    continue
+
+                enriched = await self._enrich_and_filter_item(item)
+                if enriched:
+                    filtered.append(enriched)
+                if len(filtered) >= max_results:
+                    break
+
             if len(filtered) >= max_results:
                 break
+
         return filtered[:max_results]
 
     async def filter_and_request(

@@ -454,7 +454,7 @@ async def test_get_list_items_requests_user_list_endpoint():
     ])
     client = TraktClient("cid", "secret", session=session)
 
-    result = await client.get_list_items("sean", "horror", "movie", limit=10, authenticated=False)
+    result = await client.get_list_items("sean", "horror", "movie", limit=10, page=2, authenticated=False)
 
     assert result == [{
         "tmdb_id": "949",
@@ -463,6 +463,7 @@ async def test_get_list_items_requests_user_list_endpoint():
         "year": 1995,
     }]
     assert session.calls[0][1] == "https://api.trakt.tv/users/sean/lists/horror/items/movies"
+    assert session.calls[0][2]["params"]["page"] == 2
 
 
 @pytest.mark.asyncio
@@ -474,7 +475,8 @@ async def test_get_watchlist_items_requests_user_watchlist_endpoint():
     ])
     client = TraktClient("cid", "secret", "access", session=session)
 
-    result = await client.get_watchlist_items("me", "tv", limit=10, authenticated=True)
+    result = await client.get_watchlist_items("me", "tv", limit=10, page=3, authenticated=True)
 
     assert result[0]["tmdb_id"] == "70523"
     assert session.calls[0][1] == "https://api.trakt.tv/users/me/watchlist/shows"
+    assert session.calls[0][2]["params"]["page"] == 3

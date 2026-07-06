@@ -370,3 +370,15 @@ class TraktJobAutomationBase:
         if await self.seer_client.check_already_requested(tmdb_id, media_type):
             return True
         return False
+
+    async def _should_skip_fetch_item(
+        self,
+        media_type: str,
+        tmdb_id: Any,
+        dedup_mode: str,
+        per_list_seen: set[tuple[str, str]],
+    ) -> bool:
+        """Return True when a raw Trakt item should be skipped during fetch."""
+        if dedup_mode == "per_list":
+            return (str(tmdb_id), media_type) in per_list_seen
+        return await self._should_skip_global_request(media_type, tmdb_id)

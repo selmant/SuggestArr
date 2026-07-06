@@ -23,6 +23,7 @@ from api_service.jobs.trakt_list_automation import (
     TraktListAutomation,
     execute_trakt_list_job,
 )
+from api_service.services.trakt.trakt_client import TraktClient
 from api_service.utils.asyncio_loop import run_coroutine_sync
 
 logger = LoggerManager.get_logger("JobsRoute")
@@ -63,6 +64,34 @@ def get_job_manager() -> JobManager:
     if 'trakt_list' not in manager._job_executors:
         manager.set_job_executor(execute_trakt_list_job, job_type='trakt_list')
     return manager
+
+
+def _titleize_slug(slug: str) -> str:
+    """Convert a Trakt list slug into a readable title."""
+    return " ".join(part.capitalize() for part in slug.replace("_", "-").split("-") if part)
+
+
+def _default_trakt_list_job_name(data: dict) -> str:
+    """Derive a job name from Trakt list filters when the client leaves name blank."""
+    filters = data.get("filters") or {}
+    list_name = str(filters.get("list_name") or "").strip()
+    if list_name:
+        return list_name
+    if filters.get("watchlist"):
+        return "Trakt Watchlist"
+    list_ref = str(filters.get("list_ref") or filters.get("list_slug") or "").strip()
+    if list_ref:
+        return _titleize_slug(list_ref)
+    list_url = str(filters.get("list_url") or "").strip()
+    if list_url:
+        try:
+            _, ref = TraktClient.parse_list_url(list_url)
+            if ref == "watchlist":
+                return "Trakt Watchlist"
+            return _titleize_slug(ref)
+        except ValueError:
+            pass
+    return "Trakt List"
 
 
 def _validate_trakt_list_job(data: dict) -> Optional[str]:
@@ -187,8 +216,12 @@ def create_job():
     try:
         data = request.get_json()
 
-        # Validate required fields
-        required = ['name', 'media_type', 'filters', 'schedule_type', 'schedule_value']
+        job_type = data.get('job_type', 'discover')
+
+        # Validate required fields (trakt_list jobs may omit name; it is derived from the list)
+        required = ['media_type', 'filters', 'schedule_type', 'schedule_value']
+        if job_type != 'trakt_list':
+            required.insert(0, 'name')
         missing = [f for f in required if f not in data]
         if missing:
             return jsonify({
@@ -197,7 +230,6 @@ def create_job():
             }), 400
 
         # Set default job_type
-        job_type = data.get('job_type', 'discover')
         if job_type not in VALID_JOB_TYPES:
             return jsonify({
                 'status': 'error',
@@ -231,6 +263,8 @@ def create_job():
             list_error = _validate_trakt_list_job(data)
             if list_error:
                 return jsonify({'status': 'error', 'message': list_error}), 400
+            if not str(data.get('name') or '').strip():
+                data['name'] = _default_trakt_list_job_name(data)
 
         # Validate schedule_type
         if data['schedule_type'] not in ['preset', 'cron']:
@@ -320,6 +354,8 @@ def update_job(job_id: int):
             list_error = _validate_trakt_list_job(merged)
             if list_error:
                 return jsonify({'status': 'error', 'message': list_error}), 400
+            if not str(merged.get('name') or '').strip():
+                data['name'] = _default_trakt_list_job_name(merged)
 
         # Validate schedule_type if provided
         if 'schedule_type' in data and data['schedule_type'] not in ['preset', 'cron']:

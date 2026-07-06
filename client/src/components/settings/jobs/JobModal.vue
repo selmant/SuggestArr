@@ -103,8 +103,11 @@
                 type="text"
                 :placeholder="jobNamePlaceholder"
                 class="form-control"
-                required
+                :required="jobNameRequired"
               />
+              <small v-if="form.job_type === 'trakt_list'" class="form-help">
+                Leave blank to use the Trakt list name.
+              </small>
             </div>
 
             <div class="form-group">
@@ -343,11 +346,15 @@ export default {
     jobNamePlaceholder() {
       if (this.form.job_type === 'discover') return 'e.g., Popular Movies 2024';
       if (this.form.job_type === 'trakt_recommendations') return 'e.g., Weekly Trakt Picks';
-      if (this.form.job_type === 'trakt_list') return 'e.g., Horror Watchlist Sync';
+      if (this.form.job_type === 'trakt_list') return 'Leave blank to use list name';
       return 'e.g., Weekly Recommendations';
     },
+    jobNameRequired() {
+      return this.form.job_type !== 'trakt_list';
+    },
     isValid() {
-      if (!this.form.name.trim().length || !this.form.media_type) {
+      const nameRequired = this.form.job_type !== 'trakt_list';
+      if ((nameRequired && !this.form.name.trim().length) || !this.form.media_type) {
         return false;
       }
       if (this.form.job_type === 'trakt_recommendations') {
@@ -410,7 +417,43 @@ export default {
     }
     await this.refreshTraktSetup();
   },
+  watch: {
+    'form.filters.list_name'(listName) {
+      if (this.form.job_type !== 'trakt_list' || !listName || this.form.name.trim()) {
+        return;
+      }
+      this.form.name = listName;
+    }
+  },
   methods: {
+    deriveTraktListJobName(filters = {}) {
+      const listName = String(filters.list_name || '').trim();
+      if (listName) {
+        return listName;
+      }
+      if (filters.watchlist) {
+        return 'Trakt Watchlist';
+      }
+      const listRef = String(filters.list_ref || filters.list_slug || '').trim();
+      if (listRef) {
+        return listRef
+          .replace(/-/g, ' ')
+          .replace(/\b\w/g, (char) => char.toUpperCase());
+      }
+      const listUrl = String(filters.list_url || '').trim();
+      if (listUrl) {
+        const slug = listUrl.split('/').filter(Boolean).pop() || '';
+        if (slug.toLowerCase() === 'watchlist') {
+          return 'Trakt Watchlist';
+        }
+        if (slug) {
+          return slug
+            .replace(/-/g, ' ')
+            .replace(/\b\w/g, (char) => char.toUpperCase());
+        }
+      }
+      return 'Trakt List';
+    },
     openAdvanced() {
       this.showAdvanced = true;
     },
@@ -475,6 +518,9 @@ export default {
           schedule_type: this.schedule.type,
           schedule_value: this.schedule.value
         };
+        if (jobData.job_type === 'trakt_list' && !String(jobData.name || '').trim()) {
+          jobData.name = this.deriveTraktListJobName(jobData.filters);
+        }
         this.$emit('save', jobData);
       } finally {
         this.isSaving = false;

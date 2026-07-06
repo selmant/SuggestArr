@@ -377,6 +377,7 @@ class TraktClient(BaseHTTPClient):
         media_type: str,
         *,
         limit: int = 100,
+        page: int = 1,
         authenticated: bool = True,
     ) -> list[dict[str, str]]:
         """Fetch items from a Trakt custom list.
@@ -386,6 +387,7 @@ class TraktClient(BaseHTTPClient):
             list_ref: List slug or numeric id.
             media_type: ``movie``, ``tv``, or ``both``.
             limit: Maximum number of items to return.
+            page: Trakt pagination page (1-based).
             authenticated: Whether to send OAuth credentials.
 
         Returns:
@@ -398,6 +400,7 @@ class TraktClient(BaseHTTPClient):
         item_types = self._list_item_types(media_type)
         params: dict[str, Any] = {
             "limit": max(1, min(int(limit), 100)),
+            "page": max(1, int(page)),
             "extended": "min",
         }
         if list_user:
@@ -414,6 +417,7 @@ class TraktClient(BaseHTTPClient):
         media_type: str,
         *,
         limit: int = 100,
+        page: int = 1,
         authenticated: bool = True,
     ) -> list[dict[str, str]]:
         """Fetch a user's Trakt watchlist items.
@@ -422,6 +426,7 @@ class TraktClient(BaseHTTPClient):
             list_user: Trakt username/slug or ``me``.
             media_type: ``movie``, ``tv``, or ``both``.
             limit: Maximum number of items to return per type.
+            page: Trakt pagination page (1-based).
             authenticated: Whether to send OAuth credentials.
 
         Returns:
@@ -429,6 +434,7 @@ class TraktClient(BaseHTTPClient):
         """
         user = (list_user or "me").strip() or "me"
         per_type_limit = max(1, min(int(limit), 100))
+        per_type_page = max(1, int(page))
         media_types = ["movie", "tv"] if media_type == "both" else [media_type]
         items: list[dict[str, str]] = []
         seen: set[tuple[str, str]] = set()
@@ -438,7 +444,11 @@ class TraktClient(BaseHTTPClient):
             payload = await self._request(
                 "GET",
                 f"/users/{user}/watchlist/{trakt_type}",
-                params={"limit": per_type_limit, "extended": "min"},
+                params={
+                    "limit": per_type_limit,
+                    "page": per_type_page,
+                    "extended": "min",
+                },
                 authenticated=authenticated,
             )
             for normalized in self._normalize_list_items(payload):

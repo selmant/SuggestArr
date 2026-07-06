@@ -165,6 +165,52 @@ def test_create_trakt_list_job_accepts_public_url(monkeypatch):
     repository.create_job.assert_called_once()
 
 
+def test_create_trakt_list_job_derives_name_from_list(monkeypatch):
+    client, repository = _make_client(monkeypatch)
+    repository.create_job.return_value = 10
+    payload = {
+        "job_type": "trakt_list",
+        "media_type": "movie",
+        "filters": {
+            "list_source": "public_url",
+            "list_url": "https://trakt.tv/users/sean/lists/horror",
+            "list_name": "Best Horror",
+            "dedup_mode": "global",
+        },
+        "schedule_type": "preset",
+        "schedule_value": "daily",
+    }
+
+    response = client.post("/api/jobs", json=payload)
+
+    assert response.status_code == 201
+    create_args = repository.create_job.call_args[0][0]
+    assert create_args["name"] == "Best Horror"
+
+
+def test_create_trakt_list_job_derives_name_from_url_slug(monkeypatch):
+    client, repository = _make_client(monkeypatch)
+    repository.create_job.return_value = 11
+    payload = {
+        "name": "",
+        "job_type": "trakt_list",
+        "media_type": "movie",
+        "filters": {
+            "list_source": "public_url",
+            "list_url": "https://trakt.tv/users/sean/lists/horror",
+            "dedup_mode": "global",
+        },
+        "schedule_type": "preset",
+        "schedule_value": "daily",
+    }
+
+    response = client.post("/api/jobs", json=payload)
+
+    assert response.status_code == 201
+    create_args = repository.create_job.call_args[0][0]
+    assert create_args["name"] == "Horror"
+
+
 def test_run_job_now_returns_202_and_starts_background_thread(monkeypatch):
     existing = {
         "id": 3,
