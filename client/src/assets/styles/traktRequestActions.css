@@ -1,0 +1,206 @@
+/* Trakt watched/rating controls in request detail modal (imported by modal + requests page). */
+
+.trakt-action-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem;
+  margin: 0.75rem 0 0;
+  background:
+    linear-gradient(135deg, rgba(237, 28, 36, 0.12), rgba(20, 20, 20, 0.72));
+  border: 1px solid rgba(237, 28, 36, 0.28);
+  border-radius: var(--radius-sm);
+}
+
+.trakt-action-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.trakt-action-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-text-primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.trakt-action-label .icon-trakt {
+  color: #ed1c24;
+}
+
+.trakt-action-state {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.trakt-action-state--warn {
+  color: #fbbf24;
+}
+
+.trakt-action-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.trakt-toggle-btn {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-secondary);
+  font-size: 0.86rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: var(--transition-base);
+}
+
+.trakt-toggle-btn:hover:not(:disabled),
+.trakt-toggle-btn.active {
+  border-color: rgba(237, 28, 36, 0.55);
+  background-color: rgba(237, 28, 36, 0.18);
+  color: var(--color-text-primary);
+}
+
+.trakt-toggle-btn:disabled,
+.trakt-points-select select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.trakt-points-select {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.45rem 0.35rem 0.65rem;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.trakt-points-select select {
+  min-height: 30px;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background-color: rgba(0, 0, 0, 0.42);
+  color: var(--color-text-primary);
+  padding: 0.25rem 0.45rem;
+  font-size: 0.86rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.trakt-inline-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.trakt-inline-state,
+.trakt-inline-btn,
+.trakt-inline-points {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.trakt-inline-state {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid rgba(237, 28, 36, 0.25);
+  background-color: rgba(237, 28, 36, 0.1);
+  color: var(--color-text-muted);
+}
+
+.trakt-inline-state.watched {
+  color: var(--color-text-primary);
+}
+
+.trakt-inline-btn {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--color-border-light);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: var(--transition-base);
+}
+
+.trakt-inline-btn:hover:not(:disabled),
+.trakt-inline-btn.active {
+  border-color: rgba(237, 28, 36, 0.55);
+  background-color: rgba(237, 28, 36, 0.16);
+  color: var(--color-text-primary);
+}
+
+.trakt-inline-btn:disabled,
+.trakt-inline-points select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.trakt-inline-points {
+  padding: 0.25rem 0.35rem 0.25rem 0.5rem;
+  border: 1px solid var(--color-border-light);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.trakt-inline-points select {
+  min-height: 24px;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background-color: rgba(0, 0, 0, 0.38);
+  color: var(--color-text-primary);
+  padding: 0.15rem 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .trakt-action-strip {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .trakt-action-controls {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .trakt-toggle-btn,
+  .trakt-points-select {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .trakt-points-select select {
+    min-width: 7rem;
+  }
+}

@@ -285,7 +285,8 @@
       <RequestDetailsModal
         :show="showModal"
         :selected-source="selectedSource"
-        :can-manage-trakt="canManageTrakt"
+        :trakt-modal-target="getTraktModalTarget(selectedSource)"
+        :can-show-related-trakt="canShowRelatedTrakt"
         :trakt-status="traktStatus"
         :trakt-status-loading="traktStatusLoading"
         :trakt-action-loading="traktActionLoading"
@@ -319,6 +320,7 @@ import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
 import {
   getAiSearchRequests,
   getRequestTraktStatus,
+  listTraktMediaUsers,
   markRequestWatched,
   rateRequestOnTrakt,
   unmarkRequestWatched,
@@ -380,6 +382,7 @@ export default {
       traktStatusLoadingByRequest: {},
       traktActionLoadingByRequest: {},
       traktStatusErrorByRequest: {},
+      defaultTraktUserId: '',
       sortOptions: [
         { value: 'date-desc', label: 'Date (Newest)' },
         { value: 'date-asc', label: 'Date (Oldest)' },
@@ -542,10 +545,57 @@ export default {
       return Boolean(
         item &&
         item.request_id &&
-        item.user_id &&
         item.media_type &&
-        !item.requests
+        !item.requests &&
+        this.resolveTraktUserId(item),
       );
+    },
+
+    canShowRelatedTrakt(item) {
+      return Boolean(
+        item?.request_id &&
+        item?.media_type &&
+        this.resolveTraktUserId(item),
+      );
+    },
+
+    resolveTraktUserId(item) {
+      const explicit = item?.user_id;
+      if (explicit) {
+        return String(explicit);
+      }
+      return this.defaultTraktUserId || '';
+    },
+
+    getTraktModalTarget(source) {
+      if (!source) {
+        return null;
+      }
+
+      if (!source.requests && this.canManageTrakt(source)) {
+        return source;
+      }
+
+      if (Array.isArray(source.requests) && source.requests.length === 1) {
+        const request = source.requests[0];
+        if (this.canShowRelatedTrakt(request)) {
+          return request;
+        }
+      }
+
+      return null;
+    },
+
+    async loadTraktDefaults() {
+      try {
+        const response = await listTraktMediaUsers();
+        const connected = (response.data?.media_users || []).filter((user) => user.trakt?.connected);
+        if (connected.length === 1) {
+          this.defaultTraktUserId = String(connected[0].external_user_id || '');
+        }
+      } catch (error) {
+        console.warn('Could not load Trakt media users for request actions:', error);
+      }
     },
 
     traktRequestKey(item) {
@@ -571,7 +621,7 @@ export default {
         [key]: status?.rating ? String(status.rating) : '',
       };
 
-      if (this.selectedSource?.request_id === item.request_id) {
+      if (this.getTraktModalTarget(this.selectedSource)?.request_id === item.request_id) {
         this.applyTraktStatus(status);
       }
     },
@@ -602,16 +652,17 @@ export default {
     },
 
     async loadTraktStatusFor(item) {
-      if (!this.canManageTrakt(item)) return;
+      if (!this.canShowRelatedTrakt(item)) return;
 
       const key = this.traktRequestKey(item);
+      const userId = this.resolveTraktUserId(item);
       this.traktStatusLoadingByRequest = { ...this.traktStatusLoadingByRequest, [key]: true };
       this.traktStatusErrorByRequest = { ...this.traktStatusErrorByRequest, [key]: '' };
       try {
         const response = await getRequestTraktStatus(
           item.request_id,
           item.media_type,
-          item.user_id,
+          userId,
         );
         this.applyTraktStatusFor(item, response.data);
       } catch (error) {
@@ -626,7 +677,8 @@ export default {
     },
 
     async loadTraktStatus() {
-      if (!this.canManageTrakt(this.selectedSource)) {
+      const target = this.getTraktModalTarget(this.selectedSource);
+      if (!target) {
         this.applyTraktStatus(null);
         return;
       }
@@ -635,12 +687,12 @@ export default {
       this.traktStatusError = '';
       try {
         const response = await getRequestTraktStatus(
-          this.selectedSource.request_id,
-          this.selectedSource.media_type,
-          this.selectedSource.user_id,
+          target.request_id,
+          target.media_type,
+          this.resolveTraktUserId(target),
         );
         this.applyTraktStatus(response.data);
-        this.applyTraktStatusFor(this.selectedSource, response.data);
+        this.applyTraktStatusFor(target, response.data);
       } catch (error) {
         this.applyTraktStatus(null);
         this.traktStatusError = error.response?.data?.message || 'Trakt unavailable';
@@ -650,25 +702,27 @@ export default {
     },
 
     async toggleTraktWatched() {
-      if (!this.canManageTrakt(this.selectedSource) || this.traktActionLoading) return;
+      const target = this.getTraktModalTarget(this.selectedSource);
+      if (!target || this.traktActionLoading) return;
 
+      const userId = this.resolveTraktUserId(target);
       this.traktActionLoading = true;
       this.traktStatusError = '';
       try {
         const response = this.traktStatus?.watched
           ? await unmarkRequestWatched(
-              this.selectedSource.request_id,
-              this.selectedSource.media_type,
-              this.selectedSource.user_id,
+              target.request_id,
+              target.media_type,
+              userId,
             )
           : await markRequestWatched(
-              this.selectedSource.request_id,
-              this.selectedSource.media_type,
-              this.selectedSource.user_id,
+              target.request_id,
+              target.media_type,
+              userId,
               this.traktRatingPoints || null,
             );
         this.applyTraktStatus(response.data);
-        this.applyTraktStatusFor(this.selectedSource, response.data);
+        this.applyTraktStatusFor(target, response.data);
       } catch (error) {
         this.traktStatusError = error.response?.data?.message || 'Could not update Trakt';
       } finally {
@@ -677,21 +731,23 @@ export default {
     },
 
     async rateSelectedOnTrakt() {
-      if (!this.canManageTrakt(this.selectedSource) || !this.traktRatingPoints || this.traktActionLoading) {
+      const target = this.getTraktModalTarget(this.selectedSource);
+      if (!target || !this.traktRatingPoints || this.traktActionLoading) {
         return;
       }
 
+      const userId = this.resolveTraktUserId(target);
       this.traktActionLoading = true;
       this.traktStatusError = '';
       try {
         const response = await rateRequestOnTrakt(
-          this.selectedSource.request_id,
-          this.selectedSource.media_type,
-          this.selectedSource.user_id,
+          target.request_id,
+          target.media_type,
+          userId,
           this.traktRatingPoints,
         );
         this.applyTraktStatus(response.data);
-        this.applyTraktStatusFor(this.selectedSource, response.data);
+        this.applyTraktStatusFor(target, response.data);
       } catch (error) {
         this.traktStatusError = error.response?.data?.message || 'Could not rate on Trakt';
       } finally {
@@ -700,17 +756,18 @@ export default {
     },
 
     async toggleTraktWatchedFor(item) {
-      if (!this.canManageTrakt(item) || this.isTraktBusy(item)) return;
+      if (!this.canShowRelatedTrakt(item) || this.isTraktBusy(item)) return;
 
       const key = this.traktRequestKey(item);
       const status = this.getTraktStatus(item);
       const rating = this.getTraktRatingPoints(item);
+      const userId = this.resolveTraktUserId(item);
       this.traktActionLoadingByRequest = { ...this.traktActionLoadingByRequest, [key]: true };
       this.traktStatusErrorByRequest = { ...this.traktStatusErrorByRequest, [key]: '' };
       try {
         const response = status?.watched
-          ? await unmarkRequestWatched(item.request_id, item.media_type, item.user_id)
-          : await markRequestWatched(item.request_id, item.media_type, item.user_id, rating || null);
+          ? await unmarkRequestWatched(item.request_id, item.media_type, userId)
+          : await markRequestWatched(item.request_id, item.media_type, userId, rating || null);
         this.applyTraktStatusFor(item, response.data);
       } catch (error) {
         this.traktStatusErrorByRequest = {
@@ -726,12 +783,13 @@ export default {
       const points = event.target.value;
       const key = this.traktRequestKey(item);
       this.traktRatingPointsByRequest = { ...this.traktRatingPointsByRequest, [key]: points };
-      if (!this.canManageTrakt(item) || !points || this.isTraktBusy(item)) return;
+      if (!this.canShowRelatedTrakt(item) || !points || this.isTraktBusy(item)) return;
 
+      const userId = this.resolveTraktUserId(item);
       this.traktActionLoadingByRequest = { ...this.traktActionLoadingByRequest, [key]: true };
       this.traktStatusErrorByRequest = { ...this.traktStatusErrorByRequest, [key]: '' };
       try {
-        const response = await rateRequestOnTrakt(item.request_id, item.media_type, item.user_id, points);
+        const response = await rateRequestOnTrakt(item.request_id, item.media_type, userId, points);
         this.applyTraktStatusFor(item, response.data);
       } catch (error) {
         this.traktStatusErrorByRequest = {
@@ -962,7 +1020,7 @@ export default {
         this.loadTraktStatus();
         if (this.selectedSource?.requests?.length) {
           this.selectedSource.requests
-            .filter((request) => this.canManageTrakt(request))
+            .filter((request) => this.canShowRelatedTrakt(request))
             .forEach((request) => this.loadTraktStatusFor(request));
         }
       });
@@ -995,7 +1053,8 @@ export default {
       }
     });
 
-    setTimeout(() => {
+    setTimeout(async () => {
+      await this.loadTraktDefaults();
       this.fetchRequests();
 
       this.$nextTick(() => {

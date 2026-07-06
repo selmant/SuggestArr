@@ -62,3 +62,30 @@ jobs:
 
       - name: Run ESLint
         run: cd client && npx eslint --ext .js,.vue src/
+
+      - name: Run unit tests
+        run: cd client && npm test
+
+  test-e2e-frontend:
+    name: Frontend e2e (Playwright)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: cd client && npm install
+
+      - name: Install Playwright browsers
+        run: cd client && npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: cd client && npm run test:e2e
+        env:
+          CI: 'true'

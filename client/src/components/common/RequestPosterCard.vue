@@ -1,5 +1,5 @@
 <template>
-  <div class="request-card" :class="{ 'request-card--compact': compact }" @click="$emit('select', item)">
+  <div class="request-card" :class="{ 'request-card--compact': compact }" data-testid="request-poster-card" @click="$emit('select', item)">
     <div class="request-card-poster">
       <img
         v-if="item.poster_path"

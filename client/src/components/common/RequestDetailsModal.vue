@@ -45,7 +45,7 @@
                 </div>
               </div>
 
-              <div v-if="canManageTrakt(selectedSource)" class="trakt-action-strip">
+              <div v-if="traktModalTarget" class="trakt-action-strip" data-testid="trakt-action-strip">
                 <div class="trakt-action-main">
                   <span class="trakt-action-label">
                     <i class="icon-trakt"></i>
@@ -65,13 +65,14 @@
                   <button
                     type="button"
                     class="trakt-toggle-btn"
+                    data-testid="trakt-mark-watched"
                     :class="{ active: traktStatus?.watched }"
                     :disabled="traktActionLoading || traktStatusLoading"
                     @click="$emit('toggle-trakt-watched')">
                     <i :class="traktStatus?.watched ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
                     {{ traktStatus?.watched ? 'Mark unwatched' : 'Mark watched' }}
                   </button>
-                  <label class="trakt-points-select">
+                  <label class="trakt-points-select" data-testid="trakt-points-select">
                     <span>Points</span>
                     <select
                       :value="traktRatingPoints"
@@ -154,7 +155,7 @@
                         <i class="fas fa-user"></i>
                         {{ request.user_name }}
                       </p>
-                      <div v-if="canManageTrakt(request)" class="trakt-inline-actions" @click.stop>
+                      <div v-if="canShowRelatedTrakt(request)" class="trakt-inline-actions" data-testid="trakt-inline-actions" @click.stop>
                         <span
                           class="trakt-inline-state"
                           :class="{ watched: getTraktStatus(request)?.watched }">
@@ -164,6 +165,7 @@
                         <button
                           type="button"
                           class="trakt-inline-btn"
+                          data-testid="trakt-inline-mark-watched"
                           :class="{ active: getTraktStatus(request)?.watched }"
                           :disabled="isTraktBusy(request)"
                           @click.stop="$emit('toggle-related-trakt-watched', request)">
@@ -217,7 +219,11 @@ export default {
       type: Object,
       default: null,
     },
-    canManageTrakt: {
+    traktModalTarget: {
+      type: Object,
+      default: null,
+    },
+    canShowRelatedTrakt: {
       type: Function,
       default: () => false,
     },
@@ -310,6 +316,8 @@ export default {
   },
 };
 </script>
+
+<style src="@/assets/styles/traktRequestActions.css"></style>
 
 <style scoped>
 .request-details-modal {
