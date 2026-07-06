@@ -3,10 +3,9 @@ name: Build and Publish Docker Image to Docker Hub
 permissions:
   contents: read
 
+# Homelab fork: manual only — see docker_hub_build.yml
 on:
-  push:
-    branches:
-      - nightly
+  workflow_dispatch:
 
 jobs:
   build:

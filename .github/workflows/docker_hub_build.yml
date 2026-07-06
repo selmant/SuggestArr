@@ -1,9 +1,10 @@
 name: Bump Version, Build and Publish Docker Image
 
+# Homelab fork: manual only — auto push used to bump versions/tags and attempt
+# Docker Hub publishes to ciuse99/suggestarr (upstream). Use [skip bump] in
+# commit messages when you still need this workflow run manually without a bump.
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   bump-version:
