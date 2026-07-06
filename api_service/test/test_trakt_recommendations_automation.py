@@ -71,6 +71,42 @@ async def test_fetch_trakt_recommendations_requests_max_per_type_for_both():
 
 
 @pytest.mark.asyncio
+async def test_fetch_trakt_recommendations_balances_movie_and_tv_targets():
+    automation = TraktRecommendationsAutomation()
+    automation.job_data = {
+        "media_type": "both",
+        "max_results": 30,
+        "filters": {"ignore_collected": True, "ignore_watched": True},
+    }
+    automation.trakt_client = AsyncMock()
+
+    async def get_recommendations_side_effect(item_type, **kwargs):
+        count = 20 if item_type == "movie" else 20
+        return [
+            {"tmdb_id": str(1000 + index), "title": f"{item_type}-{index}", "media_type": item_type}
+            for index in range(count)
+        ]
+
+    automation.trakt_client.get_recommendations.side_effect = get_recommendations_side_effect
+    automation._should_skip_global_request = AsyncMock(return_value=False)
+    automation._enrich_and_filter_item = AsyncMock(side_effect=lambda item: {
+        "id": int(item["tmdb_id"]),
+        "title": item["title"],
+        "media_type": item["media_type"],
+        "vote_average": 8.0,
+        "vote_count": 1000,
+    })
+
+    results = await automation.fetch_trakt_recommendations()
+
+    movie_count = sum(1 for item in results if item["media_type"] == "movie")
+    tv_count = sum(1 for item in results if item["media_type"] == "tv")
+    assert len(results) == 30
+    assert movie_count == 15
+    assert tv_count == 15
+
+
+@pytest.mark.asyncio
 async def test_fetch_trakt_recommendations_skips_already_requested_before_enriching():
     automation = TraktRecommendationsAutomation()
     automation.job_data = {

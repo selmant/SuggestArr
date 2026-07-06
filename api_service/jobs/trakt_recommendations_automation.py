@@ -168,6 +168,16 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
                 error_message=error_msg,
             )
 
+    @staticmethod
+    def _type_request_targets(max_results: int, media_types: List[str]) -> Dict[str, int]:
+        """Split the request budget evenly when fetching both movies and TV."""
+        if len(media_types) == 1:
+            return {media_types[0]: max_results}
+        return {
+            "movie": (max_results + 1) // 2,
+            "tv": max_results // 2,
+        }
+
     async def fetch_trakt_recommendations(self) -> List[Dict[str, Any]]:
         """Fetch and filter Trakt recommendations for the configured media types."""
         job_filters = self.job_data.get("filters", {})
@@ -179,15 +189,26 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
         ignore_watched = bool(job_filters.get("ignore_watched", True))
 
         media_types = ["movie", "tv"] if media_type == "both" else [media_type]
+        type_targets = self._type_request_targets(max_results, media_types)
         if len(media_types) == 1:
             per_type_limit = min(TRAKT_RECOMMENDATIONS_LIMIT_MAX, fetch_limit)
         else:
             # Recommendations do not paginate; request Trakt's max per type.
             per_type_limit = TRAKT_RECOMMENDATIONS_LIMIT_MAX
 
-        raw_items: List[Dict[str, Any]] = []
+        filtered: List[Dict[str, Any]] = []
         trakt_counts: Dict[str, int] = {}
+        kept_by_type: Dict[str, int] = {item_type: 0 for item_type in media_types}
+        stats = {
+            "missing_tmdb_id": 0,
+            "skipped_dedup": 0,
+            "failed_quality_filter": 0,
+            "kept": 0,
+        }
+        raw_items_total = 0
+
         for item_type in media_types:
+            type_target = type_targets[item_type]
             trakt_items = await self.trakt_client.get_recommendations(
                 item_type,
                 limit=per_type_limit,
@@ -195,51 +216,45 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
                 ignore_watched=ignore_watched,
             )
             trakt_counts[item_type] = len(trakt_items)
+            raw_items_total += len(trakt_items)
+
             for item in trakt_items:
-                raw_items.append({**item, "media_type": item_type})
+                if kept_by_type[item_type] >= type_target:
+                    break
 
-        filtered: List[Dict[str, Any]] = []
-        stats = {
-            "missing_tmdb_id": 0,
-            "skipped_dedup": 0,
-            "failed_quality_filter": 0,
-            "kept": 0,
-        }
-        for item in raw_items:
-            item_media_type = item.get("media_type") or media_type
-            tmdb_id = item.get("tmdb_id")
-            if not tmdb_id:
-                stats["missing_tmdb_id"] += 1
-                continue
-            if await self._should_skip_global_request(item_media_type, tmdb_id):
-                stats["skipped_dedup"] += 1
-                continue
+                tmdb_id = item.get("tmdb_id")
+                if not tmdb_id:
+                    stats["missing_tmdb_id"] += 1
+                    continue
+                if await self._should_skip_global_request(item_type, tmdb_id):
+                    stats["skipped_dedup"] += 1
+                    continue
 
-            enriched = await self._enrich_and_filter_item(item)
-            if enriched:
-                filtered.append(enriched)
-                stats["kept"] += 1
-            else:
-                stats["failed_quality_filter"] += 1
-            if len(filtered) >= max_results:
-                break
+                enriched = await self._enrich_and_filter_item({**item, "media_type": item_type})
+                if enriched:
+                    filtered.append(enriched)
+                    kept_by_type[item_type] += 1
+                    stats["kept"] += 1
+                else:
+                    stats["failed_quality_filter"] += 1
 
         self.logger.info(
             "Trakt recommendations fetch stats (target=%d, media_type=%s, "
-            "per_type_limit=%d, ignore_collected=%s, ignore_watched=%s): "
+            "type_targets=%s, per_type_limit=%d, ignore_collected=%s, ignore_watched=%s): "
             "trakt_returned=%s, raw=%d, missing_tmdb=%d, skipped_dedup=%d, "
-            "failed_quality_filter=%d, kept=%d",
+            "failed_quality_filter=%d, kept=%s",
             max_results,
             media_type,
+            type_targets,
             per_type_limit,
             ignore_collected,
             ignore_watched,
             trakt_counts,
-            len(raw_items),
+            raw_items_total,
             stats["missing_tmdb_id"],
             stats["skipped_dedup"],
             stats["failed_quality_filter"],
-            stats["kept"],
+            kept_by_type,
         )
         return filtered[:max_results]
 
