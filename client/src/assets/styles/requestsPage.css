@@ -1018,6 +1018,79 @@
   cursor: pointer;
 }
 
+.trakt-inline-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.trakt-inline-state,
+.trakt-inline-btn,
+.trakt-inline-points {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.trakt-inline-state {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid rgba(237, 28, 36, 0.25);
+  background-color: rgba(237, 28, 36, 0.1);
+  color: var(--color-text-muted);
+}
+
+.trakt-inline-state.watched {
+  color: var(--color-text-primary);
+}
+
+.trakt-inline-btn {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--color-border-light);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: var(--transition-base);
+}
+
+.trakt-inline-btn:hover:not(:disabled),
+.trakt-inline-btn.active {
+  border-color: rgba(237, 28, 36, 0.55);
+  background-color: rgba(237, 28, 36, 0.16);
+  color: var(--color-text-primary);
+}
+
+.trakt-inline-btn:disabled,
+.trakt-inline-points select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.trakt-inline-points {
+  padding: 0.25rem 0.35rem 0.25rem 0.5rem;
+  border: 1px solid var(--color-border-light);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.trakt-inline-points select {
+  min-height: 24px;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background-color: rgba(0, 0, 0, 0.38);
+  color: var(--color-text-primary);
+  padding: 0.15rem 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
 /* Filters Section */
 .filters-section {
   margin-bottom: 2rem;
