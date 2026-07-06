@@ -178,10 +178,11 @@
                       <i :class="source.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
                       {{ source.media_type.toUpperCase() }}
                     </span>
-                    <span v-if="!source.visual" class="badge badge-rating">
-                      <i class="fas fa-star"></i>
-                      {{ source.rating || 'N/A' }}
-                    </span>
+                    <RatingBadges
+                      v-if="!source.visual"
+                      :item="source"
+                      :badge-settings="ratingBadgeSettings"
+                      :compact="true" />
                     <span v-if="!source.visual && source.release_date" class="badge badge-date">
                       <i class="fas fa-calendar"></i>
                       {{ source.release_date }}
@@ -348,6 +349,7 @@ import Footer from './AppFooter.vue';
 import BaseDropdown from '@/components/common/BaseDropdown.vue';
 import RequestPosterCard from '@/components/common/RequestPosterCard.vue';
 import RequestDetailsModal from '@/components/common/RequestDetailsModal.vue';
+import RatingBadges from '@/components/common/RatingBadges.vue';
 import { formatDate } from '@/utils/dateUtils.js';
 import { SEER_STATUS_FILTER_OPTIONS } from '@/utils/seerStatus.js';
 import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
@@ -363,6 +365,7 @@ export default {
     BaseDropdown,
     RequestPosterCard,
     RequestDetailsModal,
+    RatingBadges,
   },
   setup() {
     const background = useBackgroundImage();
@@ -582,6 +585,7 @@ export default {
         imdb_rating: request.imdb_rating,
         imdb_votes: request.imdb_votes,
         rt_rating: request.rt_rating,
+        rt_user_rating: request.rt_user_rating,
         metacritic_rating: request.metacritic_rating,
         trakt_rating: request.trakt_rating,
         trakt_votes: request.trakt_votes,
@@ -600,10 +604,24 @@ export default {
         imdb_rating: sourceData.imdb_rating,
         imdb_votes: sourceData.imdb_votes,
         rt_rating: sourceData.rt_rating,
+        rt_user_rating: sourceData.rt_user_rating,
         metacritic_rating: sourceData.metacritic_rating,
         trakt_rating: sourceData.trakt_rating,
         trakt_votes: sourceData.trakt_votes,
+        rating: sourceData.rating,
       };
+    },
+
+    refreshConfigFromStorage() {
+      const savedConfig = localStorage.getItem('suggestarr_config');
+      if (!savedConfig) {
+        return;
+      }
+      try {
+        this.config = JSON.parse(savedConfig) || {};
+      } catch (e) {
+        console.error('❌ Failed to parse saved config:', e);
+      }
     },
 
     formatDate,
@@ -874,15 +892,8 @@ export default {
     },
   },
   mounted() {
-    const savedConfig = localStorage.getItem('suggestarr_config');
-    if (savedConfig) {
-      try {
-        const config = JSON.parse(savedConfig);
-        this.config = config || {};
-      } catch (e) {
-        console.error('❌ Failed to parse saved config:', e);
-      }
-    }
+    this.refreshConfigFromStorage();
+    window.addEventListener('storage', this.refreshConfigFromStorage);
 
     this.$nextTick(() => {
       if (this.config.ENABLE_STATIC_BACKGROUND) {
@@ -905,6 +916,7 @@ export default {
   },
 
   beforeUnmount() {
+    window.removeEventListener('storage', this.refreshConfigFromStorage);
     this.stopBackgroundImageRotation();
     this.cleanupObserver();
     document.body.style.overflow = 'auto';

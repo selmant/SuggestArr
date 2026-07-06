@@ -431,6 +431,7 @@ export default {
       return [
         source.imdb_rating,
         source.rt_rating,
+        source.rt_user_rating,
         source.metacritic_rating,
         source.trakt_rating,
         this.modalTraktUserRating,

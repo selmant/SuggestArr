@@ -11,6 +11,7 @@ test('getRatingBadgeSettings defaults all sources to enabled', () => {
   assert.equal(settings.showTmdb, true);
   assert.equal(settings.showImdb, true);
   assert.equal(settings.showRt, true);
+  assert.equal(settings.showRtUser, true);
   assert.equal(settings.showMetacritic, true);
   assert.equal(settings.showTraktUser, true);
   assert.equal(settings.showTraktCommunity, true);
@@ -26,6 +27,27 @@ test('getRatingBadgeSettings respects disabled toggles', () => {
   assert.equal(settings.showRt, true);
 });
 
+test('buildRatingBadges includes RT audience score when enabled', () => {
+  const badges = buildRatingBadges(
+    { rt_rating: 87, rt_user_rating: 92 },
+    {
+      showTmdb: false,
+      showImdb: false,
+      showRt: true,
+      showRtUser: true,
+      showMetacritic: false,
+      showTraktUser: false,
+      showTraktCommunity: false,
+    },
+  );
+
+  assert.deepEqual(
+    badges.map((badge) => badge.key),
+    ['rt', 'rt-user'],
+  );
+  assert.equal(badges.find((badge) => badge.key === 'rt-user').value, '92%');
+});
+
 test('buildRatingBadges only includes enabled sources with values', () => {
   const badges = buildRatingBadges(
     {
@@ -39,6 +61,7 @@ test('buildRatingBadges only includes enabled sources with values', () => {
       showTmdb: true,
       showImdb: true,
       showRt: false,
+      showRtUser: false,
       showMetacritic: true,
       showTraktUser: true,
       showTraktCommunity: true,

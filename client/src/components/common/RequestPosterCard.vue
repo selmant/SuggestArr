@@ -16,6 +16,9 @@
           <i :class="item.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
           {{ mediaTypeLabel }}
         </span>
+      </div>
+
+      <div class="poster-overlay poster-overlay--ratings">
         <RatingBadges
           class="poster-rating-badges"
           :item="item"
@@ -347,8 +350,14 @@ export default {
   top: var(--spacing-sm);
   right: var(--spacing-sm);
   left: var(--spacing-sm);
-  justify-content: space-between;
-  gap: var(--spacing-xs);
+  justify-content: flex-start;
+}
+
+.poster-overlay--ratings {
+  top: calc(var(--spacing-sm) + 1.75rem);
+  right: var(--spacing-sm);
+  left: var(--spacing-sm);
+  justify-content: flex-end;
 }
 
 .poster-overlay--bottom {
@@ -393,7 +402,7 @@ export default {
 }
 
 .poster-rating-badges {
-  margin-left: auto;
+  width: 100%;
   justify-content: flex-end;
 }
 

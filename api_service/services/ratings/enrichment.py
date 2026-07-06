@@ -13,7 +13,7 @@ from api_service.config.logger_manager import LoggerManager
 
 logger = LoggerManager.get_logger(__name__)
 
-_DEFAULT_TTL_HOURS = 24
+_DEFAULT_TTL_HOURS = 168
 
 
 @dataclass
@@ -92,6 +92,7 @@ def _has_any_rating(ratings: dict[str, Any]) -> bool:
         for key in (
             'imdb_rating',
             'rt_rating',
+            'rt_user_rating',
             'metacritic_rating',
             'trakt_rating',
         )
@@ -104,6 +105,7 @@ def _apply_ratings_to_media(media: dict[str, Any], ratings: dict[str, Any]) -> N
         'imdb_rating',
         'imdb_votes',
         'rt_rating',
+        'rt_user_rating',
         'metacritic_rating',
         'trakt_rating',
         'trakt_votes',
@@ -126,6 +128,7 @@ async def _fetch_external_ratings(
         'imdb_rating': None,
         'imdb_votes': None,
         'rt_rating': None,
+        'rt_user_rating': None,
         'metacritic_rating': None,
         'trakt_rating': None,
         'trakt_votes': None,
@@ -145,6 +148,7 @@ async def _fetch_external_ratings(
             ratings['imdb_rating'] = omdb_data.get('imdb_rating')
             ratings['imdb_votes'] = omdb_data.get('imdb_votes')
             ratings['rt_rating'] = omdb_data.get('rt_rating')
+            ratings['rt_user_rating'] = omdb_data.get('rt_user_rating')
             ratings['metacritic_rating'] = omdb_data.get('metacritic_rating')
 
     if trakt_client is not None and media_id:
@@ -172,6 +176,7 @@ async def enrich_media_ratings(
     tmdb_client=None,
     db_manager=None,
     trakt_client=None,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
     """Populate multi-source ratings on ``media`` using DB + in-run caches."""
     media_id = str(media.get('id') or media.get('media_id') or '')
@@ -181,11 +186,11 @@ async def enrich_media_ratings(
     cache_key = _cache_key(media_id, media_type)
     ttl_seconds = _ratings_ttl_seconds()
     snapshot = _RUN_CACHE.get(cache_key)
-    if snapshot and not snapshot.expired(ttl_seconds):
+    if not force_refresh and snapshot and not snapshot.expired(ttl_seconds):
         _apply_ratings_to_media(media, snapshot.ratings)
         return media
 
-    if db_manager is not None:
+    if db_manager is not None and not force_refresh:
         stored = db_manager.get_metadata_ratings(media_id, media_type)
         if stored and _db_cache_fresh(stored.get('ratings_updated_at')):
             cached = {k: v for k, v in stored.items() if k != 'ratings_updated_at'}
@@ -196,11 +201,11 @@ async def enrich_media_ratings(
     lock = _lock_for_key(cache_key)
     async with lock:
         snapshot = _RUN_CACHE.get(cache_key)
-        if snapshot and not snapshot.expired(ttl_seconds):
+        if not force_refresh and snapshot and not snapshot.expired(ttl_seconds):
             _apply_ratings_to_media(media, snapshot.ratings)
             return media
 
-        if db_manager is not None:
+        if db_manager is not None and not force_refresh:
             stored = db_manager.get_metadata_ratings(media_id, media_type)
             if stored and _db_cache_fresh(stored.get('ratings_updated_at')):
                 cached = {k: v for k, v in stored.items() if k != 'ratings_updated_at'}

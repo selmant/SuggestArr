@@ -5,6 +5,8 @@ The OMDb API (Open Movie Database) provides IMDB rating data
 using IMDB IDs (tt... format).
 """
 
+import re
+
 import aiohttp
 from api_service.services.http.base_client import BaseHTTPClient
 from api_service.config.logger_manager import LoggerManager
@@ -48,22 +50,33 @@ def _parse_omdb_ratings(data: dict) -> dict:
             imdb_rating = None
 
     rt_rating = None
+    rt_user_rating = _parse_int_rating(data.get('tomatoUserMeter'))
     metacritic_rating = _parse_int_rating(data.get('Metascore'))
     for entry in data.get('Ratings') or []:
         source = (entry or {}).get('Source')
         value = (entry or {}).get('Value')
         if source == 'Rotten Tomatoes':
             rt_rating = _parse_int_rating(value)
+        elif source in ('Rotten Tomatoes Audience', 'Rotten Tomatoes User'):
+            rt_user_rating = _parse_int_rating(value)
         elif source == 'Metacritic' and metacritic_rating is None:
             metacritic_rating = _parse_int_rating(value)
+
+    if rt_rating is None:
+        rt_rating = _parse_int_rating(data.get('tomatoMeter'))
 
     return {
         'imdb_rating': imdb_rating,
         'imdb_votes': imdb_votes,
         'imdb_rating_raw': raw_rating,
         'rt_rating': rt_rating,
+        'rt_user_rating': rt_user_rating,
         'metacritic_rating': metacritic_rating,
     }
+
+
+_RT_AUDIENCE_RE = re.compile(r'"audienceScore":\{[^}]*"score":"(\d+)"')
+_RT_USER_AGENT = 'Mozilla/5.0 (compatible; SuggestArr/1.0)'
 
 
 class OmdbClient(BaseHTTPClient):
@@ -86,6 +99,29 @@ class OmdbClient(BaseHTTPClient):
         self.base_url = "https://www.omdbapi.com/"
         self.logger.debug("OmdbClient initialized")
 
+    async def _fetch_rt_audience_score(self, rt_url: str) -> int | None:
+        """Scrape Rotten Tomatoes audience score from a movie page URL."""
+        if not rt_url or rt_url in ('N/A', ''):
+            return None
+
+        self.logger.debug("Fetching RT audience score from %s", rt_url)
+        try:
+            session = await self._get_session()
+            headers = {'User-Agent': _RT_USER_AGENT}
+            async with session.get(rt_url, headers=headers, timeout=self.REQUEST_TIMEOUT) as response:
+                if response.status not in HTTP_OK:
+                    self.logger.debug("RT page request failed for %s: HTTP %d", rt_url, response.status)
+                    return None
+                html = await response.text()
+        except aiohttp.ClientError as exc:
+            self.logger.debug("RT page request error for %s: %s", rt_url, exc)
+            return None
+
+        match = _RT_AUDIENCE_RE.search(html)
+        if not match:
+            return None
+        return _parse_int_rating(match.group(1))
+
     async def get_rating(self, imdb_id):
         """
         Fetch IMDB rating and vote count for a given IMDB ID.
@@ -100,7 +136,7 @@ class OmdbClient(BaseHTTPClient):
         if not imdb_id or not self.api_key:
             return None
 
-        url = f"{self.base_url}?i={imdb_id}&apikey={self.api_key}"
+        url = f"{self.base_url}?i={imdb_id}&apikey={self.api_key}&tomatoes=true"
         self.logger.debug("Fetching OMDb rating for IMDB ID %s", imdb_id)
 
         try:
@@ -115,6 +151,10 @@ class OmdbClient(BaseHTTPClient):
                         return None
 
                     parsed = _parse_omdb_ratings(data)
+                    if parsed['rt_user_rating'] is None:
+                        tomato_url = data.get('tomatoURL')
+                        if tomato_url and tomato_url != 'N/A':
+                            parsed['rt_user_rating'] = await self._fetch_rt_audience_score(tomato_url)
                     if parsed['imdb_rating'] is None:
                         self.logger.debug(
                             "No valid IMDB rating for IMDB ID %s (imdbRating=%s, imdbVotes=%s)",
@@ -124,10 +164,11 @@ class OmdbClient(BaseHTTPClient):
                         )
                     else:
                         self.logger.debug(
-                            "OMDb ratings for %s: IMDB %.1f, RT %s, Metacritic %s",
+                            "OMDb ratings for %s: IMDB %.1f, RT %s, RT user %s, Metacritic %s",
                             imdb_id,
                             parsed['imdb_rating'],
                             parsed['rt_rating'],
+                            parsed['rt_user_rating'],
                             parsed['metacritic_rating'],
                         )
                     return parsed

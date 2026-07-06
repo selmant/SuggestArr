@@ -405,7 +405,14 @@ LLM_MODEL=gpt-4o-mini</code></pre>
           <BaseCheckbox
             v-model="localConfig.SHOW_RATING_RT"
             :disabled="isLoading"
-            label="Show Rotten Tomatoes score"
+            label="Show Rotten Tomatoes critic score"
+          />
+        </div>
+        <div class="form-group">
+          <BaseCheckbox
+            v-model="localConfig.SHOW_RATING_RT_USER"
+            :disabled="isLoading"
+            label="Show Rotten Tomatoes audience score"
           />
         </div>
         <div class="form-group">
@@ -437,13 +444,13 @@ LLM_MODEL=gpt-4o-mini</code></pre>
             v-model.number="localConfig.RATINGS_CACHE_TTL_HOURS"
             type="number"
             min="1"
-            max="168"
-            placeholder="24"
+            step="1"
+            placeholder="168"
             class="form-control"
             :disabled="isLoading"
           />
           <small class="form-help">
-            How long to cache OMDb/Trakt ratings before refreshing (1-168 hours).
+            How long to cache OMDb/Trakt ratings before refreshing (default 168 = 7 days).
           </small>
         </div>
       </div>
@@ -754,10 +761,11 @@ export default {
           SHOW_RATING_TMDB: true,
           SHOW_RATING_IMDB: true,
           SHOW_RATING_RT: true,
+          SHOW_RATING_RT_USER: true,
           SHOW_RATING_METACRITIC: true,
           SHOW_RATING_TRAKT_USER: true,
           SHOW_RATING_TRAKT_COMMUNITY: true,
-          RATINGS_CACHE_TTL_HOURS: 24,
+          RATINGS_CACHE_TTL_HOURS: 168,
           AUTH_MODE: 'enabled',
           AUTH_TRUSTED_CIDRS: '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16',
           AUTH_BYPASS_USERNAME: 'local_admin',
@@ -910,6 +918,12 @@ export default {
         }
       }
 
+      const ratingsCacheTtl = Number(this.localConfig.RATINGS_CACHE_TTL_HOURS);
+      if (!Number.isFinite(ratingsCacheTtl) || ratingsCacheTtl < 1) {
+        this.$toast.error('Ratings cache TTL must be at least 1 hour.');
+        return;
+      }
+
       try {
         await this.$emit('save-section', {
           section: 'advanced',
@@ -935,10 +949,11 @@ export default {
             SHOW_RATING_TMDB: this.localConfig.SHOW_RATING_TMDB !== false,
             SHOW_RATING_IMDB: this.localConfig.SHOW_RATING_IMDB !== false,
             SHOW_RATING_RT: this.localConfig.SHOW_RATING_RT !== false,
+            SHOW_RATING_RT_USER: this.localConfig.SHOW_RATING_RT_USER !== false,
             SHOW_RATING_METACRITIC: this.localConfig.SHOW_RATING_METACRITIC !== false,
             SHOW_RATING_TRAKT_USER: this.localConfig.SHOW_RATING_TRAKT_USER !== false,
             SHOW_RATING_TRAKT_COMMUNITY: this.localConfig.SHOW_RATING_TRAKT_COMMUNITY !== false,
-            RATINGS_CACHE_TTL_HOURS: this.localConfig.RATINGS_CACHE_TTL_HOURS || 24,
+            RATINGS_CACHE_TTL_HOURS: ratingsCacheTtl,
             AUTH_MODE: authMode,
             AUTH_TRUSTED_CIDRS: cidrText || '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16',
             AUTH_BYPASS_USERNAME: (this.localConfig.AUTH_BYPASS_USERNAME || '').trim() || 'local_admin',
@@ -996,10 +1011,11 @@ export default {
         SHOW_RATING_TMDB: true,
         SHOW_RATING_IMDB: true,
         SHOW_RATING_RT: true,
+        SHOW_RATING_RT_USER: true,
         SHOW_RATING_METACRITIC: true,
         SHOW_RATING_TRAKT_USER: true,
         SHOW_RATING_TRAKT_COMMUNITY: true,
-        RATINGS_CACHE_TTL_HOURS: 24,
+        RATINGS_CACHE_TTL_HOURS: 168,
         AUTH_MODE: 'enabled',
         AUTH_TRUSTED_CIDRS: '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16',
         AUTH_BYPASS_USERNAME: 'local_admin',

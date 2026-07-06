@@ -108,6 +108,8 @@ class TestOmdbClientGetRating(unittest.IsolatedAsyncioTestCase):
             'imdbRating': '8.8',
             'imdbVotes': '2,400,000',
             'Metascore': '74',
+            'tomatoMeter': '87',
+            'tomatoUserMeter': '92',
             'Ratings': [
                 {'Source': 'Internet Movie Database', 'Value': '8.8/10'},
                 {'Source': 'Rotten Tomatoes', 'Value': '87%'},
@@ -129,7 +131,43 @@ class TestOmdbClientGetRating(unittest.IsolatedAsyncioTestCase):
             result = await self.client.get_rating('tt0816692')
 
         self.assertEqual(result['rt_rating'], 87)
+        self.assertEqual(result['rt_user_rating'], 92)
         self.assertEqual(result['metacritic_rating'], 74)
+
+    async def test_fetches_rt_audience_from_tomato_url(self):
+        payload = {
+            'Response': 'True',
+            'imdbRating': '8.5',
+            'imdbVotes': '1,000',
+            'Metascore': '67',
+            'tomatoURL': 'https://www.rottentomatoes.com/m/gladiator/',
+            'Ratings': [
+                {'Source': 'Rotten Tomatoes', 'Value': '80%'},
+            ],
+        }
+        omdb_response = AsyncMock()
+        omdb_response.status = 200
+        omdb_response.json = AsyncMock(return_value=payload)
+        omdb_response.__aenter__ = AsyncMock(return_value=omdb_response)
+        omdb_response.__aexit__ = AsyncMock(return_value=False)
+
+        rt_html = '"audienceScore":{"score":"87","sentiment":"POSITIVE"}'
+        rt_response = AsyncMock()
+        rt_response.status = 200
+        rt_response.text = AsyncMock(return_value=rt_html)
+        rt_response.__aenter__ = AsyncMock(return_value=rt_response)
+        rt_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(side_effect=[omdb_response, rt_response])
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch('aiohttp.ClientSession', return_value=mock_session):
+            result = await self.client.get_rating('tt0172495')
+
+        self.assertEqual(result['rt_rating'], 80)
+        self.assertEqual(result['rt_user_rating'], 87)
 
     # --- OMDb Response == False ---
 

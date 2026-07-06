@@ -16,5 +16,5 @@ test('requests page wires rating badge settings into poster cards and modal', ()
   assert.match(requestPosterCardSource, /:badge-settings="badgeSettings"/);
   assert.match(detailsModalSource, /:badge-settings="badgeSettings"/);
   assert.match(settingsAdvancedSource, /SHOW_RATING_TMDB/);
-  assert.match(settingsAdvancedSource, /RATINGS_CACHE_TTL_HOURS/);
+  assert.match(settingsAdvancedSource, /SHOW_RATING_RT_USER/);
 });

@@ -2,6 +2,7 @@ export const DEFAULT_RATING_BADGE_SETTINGS = {
   showTmdb: true,
   showImdb: true,
   showRt: true,
+  showRtUser: true,
   showMetacritic: true,
   showTraktUser: true,
   showTraktCommunity: true,
@@ -12,6 +13,7 @@ export function getRatingBadgeSettings(config = {}) {
     showTmdb: config.SHOW_RATING_TMDB !== false,
     showImdb: config.SHOW_RATING_IMDB !== false,
     showRt: config.SHOW_RATING_RT !== false,
+    showRtUser: config.SHOW_RATING_RT_USER !== false,
     showMetacritic: config.SHOW_RATING_METACRITIC !== false,
     showTraktUser: config.SHOW_RATING_TRAKT_USER !== false,
     showTraktCommunity: config.SHOW_RATING_TRAKT_COMMUNITY !== false,
@@ -51,11 +53,21 @@ export function buildRatingBadges(item = {}, settings = DEFAULT_RATING_BADGE_SET
     });
   }
 
+  if (settings.showRtUser && item.rt_user_rating != null) {
+    badges.push({
+      key: 'rt-user',
+      label: 'RT Aud',
+      value: `${item.rt_user_rating}%`,
+      icon: 'fas fa-users',
+      className: 'rating-badge--rt-user',
+    });
+  }
+
   if (settings.showMetacritic && item.metacritic_rating != null) {
     badges.push({
       key: 'metacritic',
       label: 'MC',
-      value: String(item.metacritic_rating),
+      value: `${item.metacritic_rating}/100`,
       icon: 'fas fa-m',
       className: 'rating-badge--metacritic',
     });

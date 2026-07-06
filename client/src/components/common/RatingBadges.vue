@@ -108,6 +108,12 @@ export default {
   color: #ff6b4a;
 }
 
+.rating-badge--rt-user {
+  background-color: rgba(250, 180, 50, 0.18);
+  border-color: rgba(250, 180, 50, 0.35);
+  color: #ffb84d;
+}
+
 .rating-badge--metacritic {
   background-color: rgba(255, 204, 0, 0.16);
   border-color: rgba(255, 204, 0, 0.35);
