@@ -15,6 +15,8 @@ from api_service.services.request_sources import TRAKT_RECOMMENDATIONS_SOURCE
 from api_service.services.trakt.media_user_augmentor import TraktAccountResolver
 from api_service.services.trakt.trakt_client import TraktClient
 
+TRAKT_RECOMMENDATIONS_MAX = 100
+
 
 class TraktRecommendationsAutomation(TraktJobAutomationBase):
     """Automates fetching Trakt personalized recommendations and requesting via Seer."""
@@ -179,7 +181,11 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
         ignore_watched = bool(job_filters.get("ignore_watched", True))
 
         media_types = ["movie", "tv"] if media_type == "both" else [media_type]
-        per_type_limit = fetch_limit if len(media_types) == 1 else max(fetch_limit // 2, max_results)
+        if len(media_types) == 1:
+            per_type_limit = min(TRAKT_RECOMMENDATIONS_MAX, fetch_limit)
+        else:
+            # Recommendations do not paginate; fetch Trakt's max per type.
+            per_type_limit = TRAKT_RECOMMENDATIONS_MAX
 
         raw_items: List[Dict[str, Any]] = []
         trakt_counts: Dict[str, int] = {}

@@ -41,6 +41,36 @@ async def test_fetch_trakt_recommendations_applies_max_results():
 
 
 @pytest.mark.asyncio
+async def test_fetch_trakt_recommendations_requests_max_per_type_for_both():
+    automation = TraktRecommendationsAutomation()
+    automation.job_data = {
+        "media_type": "both",
+        "max_results": 30,
+        "filters": {"ignore_collected": True, "ignore_watched": True},
+    }
+    automation.trakt_client = AsyncMock()
+    automation.trakt_client.get_recommendations.return_value = []
+    automation._should_skip_global_request = AsyncMock(return_value=False)
+    automation._enrich_and_filter_item = AsyncMock(return_value=None)
+
+    await automation.fetch_trakt_recommendations()
+
+    assert automation.trakt_client.get_recommendations.await_count == 2
+    automation.trakt_client.get_recommendations.assert_any_await(
+        "movie",
+        limit=100,
+        ignore_collected=True,
+        ignore_watched=True,
+    )
+    automation.trakt_client.get_recommendations.assert_any_await(
+        "tv",
+        limit=100,
+        ignore_collected=True,
+        ignore_watched=True,
+    )
+
+
+@pytest.mark.asyncio
 async def test_fetch_trakt_recommendations_skips_already_requested_before_enriching():
     automation = TraktRecommendationsAutomation()
     automation.job_data = {
