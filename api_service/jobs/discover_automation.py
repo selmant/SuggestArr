@@ -13,6 +13,7 @@ from api_service.db.job_repository import JobRepository
 from api_service.services.filter_normalization import normalize_filters
 from api_service.services.seer.seer_client import SeerClient
 from api_service.services.request_sources import DISCOVER_SOURCE
+from api_service.services.tmdb.anime_detection import is_anime_media
 from api_service.services.tmdb.tmdb_discover import TMDbDiscover
 
 
@@ -281,6 +282,7 @@ class DiscoverAutomation:
                     item,
                     source={"id": DISCOVER_SOURCE},
                     user=None,
+                    is_anime=is_anime_media(item),
                 )
 
                 if success:

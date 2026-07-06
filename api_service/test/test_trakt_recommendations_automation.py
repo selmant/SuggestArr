@@ -254,6 +254,48 @@ async def test_filter_and_request_uses_local_content_for_downloaded_check():
 
 
 @pytest.mark.asyncio
+async def test_filter_and_request_passes_anime_flag_to_seer():
+    automation = TraktRecommendationsAutomation()
+    automation.job_data = {"media_type": "tv"}
+    automation.local_content = {}
+    automation.seer_discovered_ids = set()
+    automation.db_manager = MagicMock()
+    automation.db_manager.check_request_exists.return_value = False
+    automation.seer_client = MagicMock()
+    automation.seer_client.check_already_downloaded = AsyncMock(return_value=False)
+    automation.seer_client.check_already_requested = AsyncMock(return_value=False)
+    automation.seer_client.request_media = AsyncMock(return_value=True)
+
+    requested_count, dry_run_items = await automation.filter_and_request([
+        {
+            "id": 21,
+            "title": "Anime Show",
+            "media_type": "tv",
+            "genre_ids": [16],
+            "original_language": "ja",
+            "origin_country": ["JP"],
+        },
+    ])
+
+    assert requested_count == 1
+    assert dry_run_items is None
+    automation.seer_client.request_media.assert_awaited_once_with(
+        "tv",
+        {
+            "id": 21,
+            "title": "Anime Show",
+            "media_type": "tv",
+            "genre_ids": [16],
+            "original_language": "ja",
+            "origin_country": ["JP"],
+        },
+        source={"id": "trakt_recommendations"},
+        user=None,
+        is_anime=True,
+    )
+
+
+@pytest.mark.asyncio
 async def test_initialize_components_skips_seer_cache_sync_in_dry_run():
     automation = TraktRecommendationsAutomation()
     automation.job_data = {"filters": {}, "media_type": "movie"}

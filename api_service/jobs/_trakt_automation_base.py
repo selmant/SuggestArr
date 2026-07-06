@@ -11,6 +11,7 @@ from api_service.jobs.recommendation_automation import (
 from api_service.services.config_service import ConfigService
 from api_service.services.filter_normalization import normalize_filters
 from api_service.services.seer.seer_client import SeerClient
+from api_service.services.tmdb.anime_detection import is_anime_media
 from api_service.services.tmdb.tmdb_client import TMDbClient
 from api_service.utils.tmdb_images import tmdb_image_url
 
@@ -334,11 +335,18 @@ class TraktJobAutomationBase:
             "release_date": data.get("release_date") or data.get("first_air_date"),
             "first_air_date": data.get("first_air_date"),
             "original_language": data.get("original_language"),
+            "origin_country": data.get("origin_country") or [],
+            "production_countries": data.get("production_countries") or [],
             "poster_path": tmdb_image_url(data.get("poster_path"), "w500"),
             "backdrop_path": tmdb_image_url(data.get("backdrop_path"), "w1280"),
             "overview": data.get("overview"),
             "media_type": media_type,
         }
+
+    @staticmethod
+    def _is_anime_item(item: Dict[str, Any]) -> bool:
+        """Return whether a mixed-source Trakt item should use anime routing."""
+        return is_anime_media(item)
 
     @staticmethod
     def _format_dry_run_item(media_type: str, item: Dict[str, Any]) -> Dict[str, Any]:

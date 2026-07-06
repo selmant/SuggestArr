@@ -286,6 +286,7 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
                     item,
                     source={"id": TRAKT_RECOMMENDATIONS_SOURCE},
                     user=None,
+                    is_anime=self._is_anime_item(item),
                 )
                 if success:
                     requested_count += 1

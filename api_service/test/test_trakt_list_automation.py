@@ -57,6 +57,44 @@ async def test_filter_and_request_per_list_dedup_marks_seen_items():
 
 
 @pytest.mark.asyncio
+async def test_filter_and_request_passes_anime_flag_to_seer():
+    automation = TraktListAutomation()
+    automation.job_id = 7
+    automation.job_data = {"filters": {"dedup_mode": "global"}, "media_type": "movie"}
+    automation.db_manager = MagicMock()
+    automation.seer_client = AsyncMock()
+    automation.seer_client.request_media.return_value = True
+    automation._should_skip_global_request = AsyncMock(return_value=False)
+
+    requested_count, _ = await automation.filter_and_request([
+        {
+            "id": 1,
+            "title": "Anime Film",
+            "media_type": "movie",
+            "genre_ids": [16],
+            "original_language": "ja",
+            "origin_country": ["JP"],
+        },
+    ])
+
+    assert requested_count == 1
+    automation.seer_client.request_media.assert_awaited_once_with(
+        "movie",
+        {
+            "id": 1,
+            "title": "Anime Film",
+            "media_type": "movie",
+            "genre_ids": [16],
+            "original_language": "ja",
+            "origin_country": ["JP"],
+        },
+        source={"id": "trakt_list"},
+        user=None,
+        is_anime=True,
+    )
+
+
+@pytest.mark.asyncio
 async def test_initialize_components_disables_global_exclude_requested_for_per_list():
     automation = TraktListAutomation()
     automation.job_data = {
