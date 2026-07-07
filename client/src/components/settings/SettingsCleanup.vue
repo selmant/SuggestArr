@@ -2,7 +2,7 @@
   <div class="cleanup-page" :class="{ embedded }">
     <div v-if="!embedded" class="section-header">
       <h2><i class="fas fa-broom"></i> Cleanup Automation</h2>
-      <p>Automatically delete SuggestArr requests and their files when the item has not been favorited in your media server within a grace period.</p>
+      <p>Automatically delete old SuggestArr-originated request records when the item has not been favorited in your media server within a grace period.</p>
     </div>
 
     <div v-else class="embedded-header">
@@ -10,14 +10,14 @@
         <i class="fas fa-broom"></i>
         Cleanup Automation
       </h3>
-      <p>Remove old SuggestArr requests when media-server users never favorite them.</p>
+      <p>Remove old SuggestArr and Seer request records when media-server users never favorite them.</p>
     </div>
 
     <div class="warning-banner">
       <i class="fas fa-exclamation-triangle"></i>
       <div class="warning-content">
         <strong>Destructive action</strong>
-        <span>When enabled and not in dry-run, this asks Seer to delete the matched media files. Always run in dry-run first to verify the candidate list.</span>
+        <span>When enabled and not in dry-run, this asks Seer to delete matched request records only. Media files are left untouched. Always run in dry-run first to verify the candidate list.</span>
       </div>
     </div>
 
@@ -43,7 +43,7 @@
             <i class="fas fa-vial"></i>
             Dry-run mode
           </span>
-          <span class="toggle-hint">Logs which items would be sent to Seer for deletion without touching files. Strongly recommended before flipping to real deletion.</span>
+          <span class="toggle-hint">Logs which request records would be sent to Seer for deletion without changing Seer. Strongly recommended before flipping to real deletion.</span>
         </span>
         <div class="toggle-switch" :class="{ on: form.dry_run }" @click="form.dry_run = !form.dry_run">
           <div class="toggle-knob"></div>
@@ -56,7 +56,7 @@
             <i class="fas fa-hourglass-half"></i>
             Grace period (days)
           </span>
-          <span class="toggle-hint">If a requested item has not been favorited in Plex, Jellyfin, or Emby within this many days of being requested, it becomes a deletion candidate.</span>
+          <span class="toggle-hint">If a requested item has not been favorited in Plex, Jellyfin, or Emby within this many days of being requested, its request record becomes a deletion candidate.</span>
         </span>
         <input v-model.number="form.grace_days" type="number" min="1" max="365" class="number-input" />
       </div>
@@ -70,7 +70,7 @@
           <i :class="running && lastTrigger === 'dry' ? 'fas fa-spinner fa-spin' : 'fas fa-vial'"></i>
           Run now (dry-run)
         </button>
-        <button class="btn btn-danger" :disabled="running || !form.enabled" @click="runNow(false)" title="Performs real deletions">
+        <button class="btn btn-danger" :disabled="running || !form.enabled" @click="runNow(false)" title="Deletes Seer request records only">
           <i :class="running && lastTrigger === 'real' ? 'fas fa-spinner fa-spin' : 'fas fa-trash-alt'"></i>
           Run now (real)
         </button>
@@ -168,7 +168,7 @@
         <i class="fas fa-info-circle"></i>
         <div class="warning-content">
           <strong>Record cleanup only</strong>
-          <span>This deletes Seer request rows, not media files. Use the section above for file cleanup. Runs daily at 04:30 when enabled.</span>
+          <span>This deletes Seer request rows, not media files. Runs daily at 04:30 when enabled.</span>
         </div>
       </div>
 

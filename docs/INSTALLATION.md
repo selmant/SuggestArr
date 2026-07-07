@@ -369,7 +369,7 @@ If no linked Trakt accounts exist, job filters will warn that Trakt is not usabl
 
 ## Cleanup Automation
 
-Cleanup Automation removes old SuggestArr-originated requests and their media files when users did not mark the item as a favorite in the configured media server.
+Cleanup Automation removes old SuggestArr-originated request records when users did not mark the item as a favorite in the configured media server.
 
 It is designed as a safety valve for automated requests:
 
@@ -379,7 +379,7 @@ It is designed as a safety valve for automated requests:
 4. Cleanup checks old SuggestArr requests after the grace period.
 5. Favorited items are kept.
 6. Non-favorited items become deletion candidates.
-7. In real mode, SuggestArr asks Seer to delete the media file.
+7. In real mode, SuggestArr asks Seer to delete the matching request record.
 
 Cleanup supports Plex, Jellyfin, and Emby.
 
@@ -394,7 +394,7 @@ Advanced > Cleanup Automation
 Available settings:
 
 - Enable cleanup automation: daily cleanup runs at 04:15 server time.
-- Dry-run mode: logs what would be deleted without touching files.
+- Dry-run mode: logs which request records would be deleted without changing Seer.
 - Grace period: number of days after request creation before an item is checked.
 - Run now (dry-run): immediately preview cleanup actions.
 - Run now (real): immediately perform deletion actions when cleanup is enabled.
@@ -411,7 +411,7 @@ Recommended first setup:
 5. Keep dry-run for several scheduled cycles.
 6. Disable dry-run only after you trust the candidate list.
 
-Cleanup is destructive in real mode. It asks Seer to delete matching media files and removes the SuggestArr request row after Seer accepts the deletion request.
+Cleanup is destructive in real mode. It asks Seer to delete matching request records and removes the SuggestArr request row after Seer accepts the request deletion. Media files are not deleted.
 
 ### How favorites are detected
 
@@ -425,17 +425,17 @@ Jellyfin and Emby:
 - Cleanup reads favorite items for selected users and libraries.
 - Favorited movies and series are treated as keepers.
 
-Items not found in the media library are logged as skipped because there is nothing local to delete.
+Items not found in the media library are logged as skipped because cleanup only evaluates media that is still present locally.
 
 ### Cleanup audit actions
 
 Common audit actions:
 
-- `would_delete`: dry-run candidate that would be deleted in real mode.
-- `deleted`: Seer accepted the file deletion request.
+- `would_delete`: dry-run candidate whose request record would be deleted in real mode.
+- `deleted`: Seer accepted the request-record deletion.
 - `kept_favorited`: item is favorited and was kept.
 - `skipped_not_in_library`: item was not found in the media library.
-- `delete_failed`: Seer did not accept the deletion request.
+- `delete_failed`: Seer did not accept the request-record deletion.
 - `error`: unexpected cleanup error for that item.
 
 ### Notes and limits

@@ -1,4 +1,4 @@
-"""Cleanup automation: prune SuggestArr-originated requests + files when the
+"""Cleanup automation: prune SuggestArr-originated requests when the
 underlying media has not been favorited in the configured media server within
 a configurable grace period.
 
@@ -231,6 +231,7 @@ async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optiona
     favorite_map = await _build_favorite_map(env_vars, media_service)
 
     seer_client = None
+    seer_requests_index = {}
     if not dry_run:
         seer_client = SeerClient(
             env_vars['SEER_API_URL'],
@@ -244,6 +245,7 @@ async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optiona
             {},
             False,
         )
+        seer_requests_index = await seer_client.get_requests_index()
 
     deleted = kept = missing = errors = 0
     for cand in candidates:
@@ -271,25 +273,38 @@ async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optiona
             db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
                                action='would_delete', was_dry_run=True,
                                user_rating=rating,
-                               reason=f'Not favorited after {grace_days} days; would request file deletion from Seer.')
+                               reason=f'Not favorited after {grace_days} days; would delete the Seer request record.')
             deleted += 1
             continue
 
         try:
-            ok = await seer_client.delete_media_file_by_tmdb(int(tmdb_id), media_type)
+            seer_requests = seer_requests_index.get((media_type, str(tmdb_id)), [])
+            seer_request_id = next(
+                (request.get('id') for request in seer_requests if request.get('id') is not None),
+                None,
+            )
+            if seer_request_id is None:
+                errors += 1
+                db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
+                                   action='delete_failed', was_dry_run=False,
+                                   user_rating=rating,
+                                   reason='No matching Seer request record was found; nothing was deleted.')
+                continue
+
+            ok = await seer_client.delete_request(seer_request_id)
             if ok:
                 deleted += 1
                 db.delete_request_row(tmdb_id, media_type)
                 db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
                                    action='deleted', was_dry_run=False,
                                    user_rating=rating,
-                                   reason=f'Not favorited after {grace_days} days; Seer accepted the file deletion request.')
+                                   reason=f'Not favorited after {grace_days} days; Seer accepted the request-record deletion.')
             else:
                 errors += 1
                 db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
                                    action='delete_failed', was_dry_run=False,
                                    user_rating=rating,
-                                   reason='Seer DELETE returned a non-success status; see logs.')
+                                   reason='Seer request DELETE returned a non-success status; see logs.')
         except Exception as exc:
             errors += 1
             logger.error("Cleanup: error deleting tmdb_id=%s media_type=%s: %s", tmdb_id, media_type, exc)

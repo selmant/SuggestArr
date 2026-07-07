@@ -21,7 +21,7 @@ SuggestArr is a project designed to automate media content recommendations and d
 - **Trakt Watch History**: Let each user link their own Trakt account. SuggestArr can use Trakt recent watches as recommendation seeds and skip content already watched on Trakt.
 - **Automated Requests**: Sends download requests for recommended content to Seer.
 - **Pending-Request Job Pause**: Skip scheduled or manual jobs while Seer still has requests waiting for approval or denial.
-- **Cleanup Automation**: Optionally prune old SuggestArr-originated requests and files when users never favorite them in Plex, Jellyfin, or Emby.
+- **Cleanup Automation**: Optionally prune old SuggestArr-originated request records when users never favorite them in Plex, Jellyfin, or Emby.
 - **Web Interface**: A user-friendly interface for configuration and management.
 - **Real-Time Logs**: View and filter logs in real time (e.g., `INFO`, `ERROR`, `DEBUG`).
 - **User Selection**: Choose specific users to initiate requests, allowing management and approval of auto-requested content.
@@ -125,10 +125,10 @@ It looks at requests created by SuggestArr, waits for the configured grace perio
 
 - keeps favorited items
 - skips items no longer present in the media library
-- logs what would be deleted in dry-run mode
-- asks Seer to delete matching media files when real mode is enabled
+- logs which request records would be deleted in dry-run mode
+- asks Seer to delete matching request records when real mode is enabled
 
-Cleanup is off by default and starts safely in dry-run mode. Always run dry-run first and review the audit log before enabling real deletions.
+Cleanup is off by default and starts safely in dry-run mode. Always run dry-run first and review the audit log before enabling real request-record deletions.
 
 ## AI-Powered Recommendations (Beta)
 
@@ -242,4 +242,3 @@ Contributions are highly welcome! Feel free to open issues, submit pull requests
 
 ## License
 This project is licensed under the MIT License.
-
