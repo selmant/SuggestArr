@@ -102,6 +102,54 @@ class TestCleanupAutomationDeletion(unittest.IsolatedAsyncioTestCase):
         self.assertIn("deleted", FakeDB.log_actions)
         self.assertEqual(result["deleted"], 1)
 
+    async def test_dry_run_deletes_missing_library_item_when_seer_request_exists(self):
+        class FakeDB:
+            log_actions = []
+
+            def get_cleanup_settings(self):
+                return {"enabled": True, "dry_run": True, "grace_days": 7}
+
+            def get_suggestarr_requests_older_than(self, cutoff):
+                return [{
+                    "tmdb_id": "99",
+                    "media_type": "movie",
+                    "requested_at": "2026-05-01 00:00:00",
+                    "title": "Missing Movie",
+                }]
+
+            def add_cleanup_log(self, **kwargs):
+                FakeDB.log_actions.append(kwargs["action"])
+
+            def update_cleanup_settings(self, **kwargs):
+                pass
+
+        class FakeSeerClient:
+            instances = []
+
+            def __init__(self, *args, **kwargs):
+                self.get_requests_index = AsyncMock(return_value={
+                    ("movie", "99"): [{"id": 456, "status": 3, "media_status": 2}],
+                })
+                self.close = AsyncMock()
+                FakeSeerClient.instances.append(self)
+
+        with patch.object(cleanup_automation, "DatabaseManager", return_value=FakeDB()), \
+             patch.object(cleanup_automation.ConfigService, "get_runtime_config", return_value={
+                 "SELECTED_SERVICE": "jellyfin",
+                 "JELLYFIN_API_URL": "http://jellyfin.local",
+                 "JELLYFIN_TOKEN": "token",
+                 "SEER_API_URL": "http://seer.local",
+                 "SEER_TOKEN": "seer-token",
+             }), \
+             patch.object(cleanup_automation, "_build_favorite_map", AsyncMock(return_value={})), \
+             patch.object(cleanup_automation, "SeerClient", FakeSeerClient):
+            result = await cleanup_automation.execute_cleanup_job()
+
+        self.assertEqual(result["deleted"], 1)
+        self.assertEqual(result["missing"], 0)
+        self.assertEqual(FakeDB.log_actions, ["would_delete"])
+        FakeSeerClient.instances[0].get_requests_index.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -378,7 +378,7 @@ It is designed as a safety valve for automated requests:
 3. If they want to keep it, they favorite it in Plex, Jellyfin, or Emby.
 4. Cleanup checks old SuggestArr requests after the grace period.
 5. Favorited items are kept.
-6. Non-favorited items become deletion candidates.
+6. Non-favorited items, including items no longer present in the media library, become deletion candidates when Seer still has a matching request record.
 7. In real mode, SuggestArr asks Seer to delete the matching request record.
 
 Cleanup supports Plex, Jellyfin, and Emby.
@@ -425,7 +425,7 @@ Jellyfin and Emby:
 - Cleanup reads favorite items for selected users and libraries.
 - Favorited movies and series are treated as keepers.
 
-Items not found in the media library are logged as skipped because cleanup only evaluates media that is still present locally.
+Items not found in the media library are treated as non-favorited. Cleanup skips them only when Seer no longer has a matching request record.
 
 ### Cleanup audit actions
 
@@ -434,7 +434,7 @@ Common audit actions:
 - `would_delete`: dry-run candidate whose request record would be deleted in real mode.
 - `deleted`: Seer accepted the request-record deletion.
 - `kept_favorited`: item is favorited and was kept.
-- `skipped_not_in_library`: item was not found in the media library.
+- `skipped_not_in_seer`: no matching Seer request record was found.
 - `delete_failed`: Seer did not accept the request-record deletion.
 - `error`: unexpected cleanup error for that item.
 
@@ -443,6 +443,10 @@ Common audit actions:
 - Cleanup only considers requests tracked by SuggestArr.
 - Cleanup does not run when disabled, except manual Run now can force a dry-run or real run.
 - Cleanup requires Seer URL/token and a configured Plex, Jellyfin, or Emby server.
+
+### Seer Request Import
+
+Seer Request Import can import all Seer request records into SuggestArr or only pending Seer requests. Imported and already-tracked rows are refreshed with the Seer request id, raw request status, raw media status, derived Seer status, and Seer updated timestamp.
 - Only admins can change cleanup settings or run cleanup manually.
 
 ## External Database

@@ -129,6 +129,20 @@
         </div>
       </label>
 
+      <div class="number-option">
+        <span class="toggle-label">
+          <span class="toggle-title">
+            <i class="fas fa-filter"></i>
+            Import scope
+          </span>
+          <span class="toggle-hint">Import all Seer request records now, or limit future imports to pending requests only.</span>
+        </span>
+        <select v-model="importForm.status_filter" class="select-input">
+          <option value="all">All Seer requests</option>
+          <option value="pending">Pending requests only</option>
+        </select>
+      </div>
+
       <div class="actions-row">
         <button class="btn btn-primary" :disabled="importSaving" @click="saveImport">
           <i :class="importSaving ? 'fas fa-spinner fa-spin' : 'fas fa-save'"></i>
@@ -465,7 +479,7 @@ export default {
       importRunning: false,
       lastImportTrigger: null,
       importSettings: null,
-      importForm: { enabled: false, dry_run: true },
+      importForm: { enabled: false, dry_run: true, status_filter: 'all' },
       importLog: [],
       importLogCollapsed: true,
       importLogPage: 1,
@@ -550,6 +564,7 @@ export default {
         this.importForm = {
           enabled: !!this.importSettings.enabled,
           dry_run: !!this.importSettings.dry_run,
+          status_filter: this.importSettings.status_filter || 'all',
         };
       } catch (err) {
         this.lastResult = { status: 'error', message: err.response?.data?.message || 'Failed to load settings.' };
@@ -834,11 +849,13 @@ export default {
 }
 .toggle-hint { color: var(--color-text-muted, #888); font-size: 0.85rem; }
 
-.number-input {
+.number-input,
+.select-input {
   width: 90px; padding: 6px 8px;
   background: var(--color-bg, #1f1f1f); border: 1px solid var(--color-border, #444);
   border-radius: 6px; color: var(--color-text-primary, white);
 }
+.select-input { width: 190px; }
 
 .actions-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .btn {

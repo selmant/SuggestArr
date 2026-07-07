@@ -123,8 +123,8 @@ Cleanup Automation is available under **Advanced -> Cleanup Automation**.
 
 It looks at requests created by SuggestArr, waits for the configured grace period, checks whether the item is favorited in Plex, Jellyfin, or Emby, and then:
 
-- keeps favorited items
-- skips items no longer present in the media library
+- keeps items that are present in the media library and favorited
+- skips items with no matching Seer request record
 - logs which request records would be deleted in dry-run mode
 - asks Seer to delete matching request records when real mode is enabled
 

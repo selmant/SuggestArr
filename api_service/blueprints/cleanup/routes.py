@@ -228,6 +228,11 @@ def seer_import_settings_set():
                 if not isinstance(value, bool):
                     return jsonify({"status": "error", "message": f"{key} must be a boolean"}), 400
                 updates[key] = value
+        status_filter = data.get("status_filter")
+        if status_filter is not None:
+            if status_filter not in ("all", "pending"):
+                return jsonify({"status": "error", "message": "status_filter must be all or pending"}), 400
+            updates["status_filter"] = status_filter
 
         settings = DatabaseManager().update_seer_import_settings(**updates)
         return jsonify({"status": "success", "settings": settings}), 200

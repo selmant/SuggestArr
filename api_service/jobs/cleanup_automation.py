@@ -232,7 +232,7 @@ async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optiona
 
     seer_client = None
     seer_requests_index = {}
-    if not dry_run:
+    if candidates:
         seer_client = SeerClient(
             env_vars['SEER_API_URL'],
             env_vars['SEER_TOKEN'],
@@ -253,16 +253,21 @@ async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optiona
         media_type = cand['media_type']
         title = cand.get('title') or f"tmdb:{tmdb_id}"
         rating = favorite_map.get((media_type, str(tmdb_id)))
+        seer_requests = seer_requests_index.get((media_type, str(tmdb_id)), [])
+        seer_request_id = next(
+            (request.get('id') for request in seer_requests if request.get('id') is not None),
+            None,
+        )
 
-        if rating is None:
+        if seer_request_id is None:
             missing += 1
             db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
-                               action='skipped_not_in_library', was_dry_run=dry_run,
+                               action='skipped_not_in_seer', was_dry_run=dry_run,
                                user_rating=None,
-                               reason=f'Not present in {media_service.title()} library; nothing to delete here.')
+                               reason='No matching Seer request record was found; nothing was deleted.')
             continue
 
-        if rating >= FAVORITE_USER_RATING:
+        if rating is not None and rating >= FAVORITE_USER_RATING:
             kept += 1
             db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
                                action='kept_favorited', was_dry_run=dry_run,
@@ -278,19 +283,6 @@ async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optiona
             continue
 
         try:
-            seer_requests = seer_requests_index.get((media_type, str(tmdb_id)), [])
-            seer_request_id = next(
-                (request.get('id') for request in seer_requests if request.get('id') is not None),
-                None,
-            )
-            if seer_request_id is None:
-                errors += 1
-                db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
-                                   action='delete_failed', was_dry_run=False,
-                                   user_rating=rating,
-                                   reason='No matching Seer request record was found; nothing was deleted.')
-                continue
-
             ok = await seer_client.delete_request(seer_request_id)
             if ok:
                 deleted += 1
@@ -320,7 +312,7 @@ async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optiona
 
     summary = (f"Candidates={len(candidates)} "
                f"{'would_delete' if dry_run else 'deleted'}={deleted} "
-               f"kept_favorited={kept} not_in_library={missing} errors={errors}")
+               f"kept_favorited={kept} not_in_seer={missing} errors={errors}")
     db.update_cleanup_settings(last_run_at=_utcnow_for_db(),
                                last_run_status=('dry_run' if dry_run else 'ok'),
                                last_run_summary=summary)

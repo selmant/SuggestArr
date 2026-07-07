@@ -210,6 +210,11 @@ class DatabaseManager:
                     requested_by TEXT,
                     user_id TEXT,
                     rationale TEXT,
+                    seer_request_id INTEGER,
+                    seer_request_status INTEGER,
+                    seer_media_status INTEGER,
+                    seer_status TEXT,
+                    seer_updated_at TIMESTAMP,
                     UNIQUE(media_type, tmdb_request_id, tmdb_source_id),
                     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )
@@ -346,6 +351,7 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY,
                     enabled INTEGER NOT NULL DEFAULT 0,
                     dry_run INTEGER NOT NULL DEFAULT 1,
+                    status_filter TEXT NOT NULL DEFAULT 'all',
                     last_run_at TIMESTAMP,
                     last_run_status TEXT,
                     last_run_summary TEXT,
@@ -673,6 +679,22 @@ class DatabaseManager:
                 if 'source_origin' not in existing_columns:
                     self.logger.debug("Adding column source_origin...")
                     cursor.execute("ALTER TABLE requests ADD COLUMN source_origin TEXT;")
+                    conn.commit()
+
+                request_seer_columns = {
+                    'seer_request_id': 'INTEGER',
+                    'seer_request_status': 'INTEGER',
+                    'seer_media_status': 'INTEGER',
+                    'seer_status': 'TEXT',
+                    'seer_updated_at': 'TIMESTAMP',
+                }
+                for column_name, column_type in request_seer_columns.items():
+                    if column_name in existing_columns:
+                        continue
+                    self.logger.debug("Adding column %s...", column_name)
+                    if self.db_type in ['mysql', 'mariadb'] and column_type == 'TEXT':
+                        column_type = 'VARCHAR(512)'
+                    cursor.execute(f"ALTER TABLE requests ADD COLUMN {column_name} {column_type};")
                     conn.commit()
                     
             except Exception as e:
@@ -2448,21 +2470,24 @@ class DatabaseManager:
     def get_seer_import_settings(self) -> dict:
         with self.get_connection() as conn:
             cursor = conn.cursor()
+            self._ensure_seer_import_settings_columns(cursor)
+            conn.commit()
             cursor.execute(
-                "SELECT id, enabled, dry_run, last_run_at, last_run_status, last_run_summary "
+                "SELECT id, enabled, dry_run, status_filter, last_run_at, last_run_status, last_run_summary "
                 "FROM seer_import_settings WHERE id = 1"
             )
             row = cursor.fetchone()
             if not row:
                 placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
                 cursor.execute(
-                    f"INSERT INTO seer_import_settings (id, enabled, dry_run) VALUES (1, {placeholder}, {placeholder})",
-                    (0, 1),
+                    f"INSERT INTO seer_import_settings (id, enabled, dry_run, status_filter) VALUES (1, {placeholder}, {placeholder}, {placeholder})",
+                    (0, 1, 'all'),
                 )
                 conn.commit()
                 return {
                     'enabled': False,
                     'dry_run': True,
+                    'status_filter': 'all',
                     'last_run_at': None,
                     'last_run_status': None,
                     'last_run_summary': None,
@@ -2470,15 +2495,41 @@ class DatabaseManager:
             return {
                 'enabled': bool(row[1]),
                 'dry_run': bool(row[2]),
-                'last_run_at': row[3],
-                'last_run_status': row[4],
-                'last_run_summary': row[5],
+                'status_filter': row[3] or 'all',
+                'last_run_at': row[4],
+                'last_run_status': row[5],
+                'last_run_summary': row[6],
             }
+
+    def _ensure_seer_import_settings_columns(self, cursor) -> None:
+        try:
+            if self.db_type == 'postgres':
+                cursor.execute(
+                    """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = 'seer_import_settings'
+                    """
+                )
+                existing_columns = {row[0] for row in cursor.fetchall()}
+            elif self.db_type in ['mysql', 'mariadb']:
+                cursor.execute("SHOW COLUMNS FROM seer_import_settings;")
+                existing_columns = {row[0] for row in cursor.fetchall()}
+            else:
+                cursor.execute("PRAGMA table_info(seer_import_settings)")
+                existing_columns = {row[1] for row in cursor.fetchall()}
+            if 'status_filter' not in existing_columns:
+                column_type = 'VARCHAR(32)' if self.db_type in ['mysql', 'mariadb'] else 'TEXT'
+                cursor.execute(
+                    f"ALTER TABLE seer_import_settings ADD COLUMN status_filter {column_type} NOT NULL DEFAULT 'all';"
+                )
+        except Exception as exc:
+            self.logger.warning("Could not ensure seer_import_settings columns: %s", exc)
 
     def update_seer_import_settings(
         self,
         enabled=None,
         dry_run=None,
+        status_filter=None,
         last_run_at=None,
         last_run_status=None,
         last_run_summary=None,
@@ -2493,6 +2544,9 @@ class DatabaseManager:
         if dry_run is not None:
             sets.append(f"dry_run = {placeholder}")
             params.append(1 if dry_run else 0)
+        if status_filter is not None:
+            sets.append(f"status_filter = {placeholder}")
+            params.append(str(status_filter))
         if last_run_at is not None:
             sets.append(f"last_run_at = {placeholder}")
             params.append(last_run_at)
@@ -2512,6 +2566,42 @@ class DatabaseManager:
                 )
                 conn.commit()
         return self.get_seer_import_settings()
+
+    def update_request_seer_state(
+        self,
+        tmdb_id: str,
+        media_type: str,
+        *,
+        seer_request_id=None,
+        seer_request_status=None,
+        seer_media_status=None,
+        seer_status=None,
+        seer_updated_at=None,
+    ) -> None:
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""UPDATE requests
+                    SET seer_request_id = {placeholder},
+                        seer_request_status = {placeholder},
+                        seer_media_status = {placeholder},
+                        seer_status = {placeholder},
+                        seer_updated_at = {placeholder}
+                    WHERE tmdb_request_id = {placeholder}
+                      AND media_type = {placeholder}
+                      AND requested_by = 'SuggestArr'""",
+                (
+                    int(seer_request_id) if seer_request_id is not None else None,
+                    int(seer_request_status) if seer_request_status is not None else None,
+                    int(seer_media_status) if seer_media_status is not None else None,
+                    seer_status,
+                    seer_updated_at,
+                    str(tmdb_id),
+                    media_type,
+                ),
+            )
+            conn.commit()
 
     def add_seer_import_log(
         self,

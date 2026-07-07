@@ -17,7 +17,7 @@ from api_service.services.config_service import ConfigService
 from api_service.services.request_sources import SEER_IMPORT_SOURCE
 from api_service.services.seer.request_actions import invalidate_requests_index_cache
 from api_service.services.seer.seer_client import SeerClient
-from api_service.services.seer.seer_status import derive_seer_status, parse_seer_timestamp
+from api_service.services.seer.seer_status import derive_seer_status, is_pending_status, parse_seer_timestamp
 
 _run_lock = threading.Lock()
 
@@ -54,15 +54,38 @@ def _collect_import_candidates(index: Dict) -> List[Dict[str, Any]]:
 
         primary = entries[-1]
         seer_status = derive_seer_status(primary.get("status"), primary.get("media_status"))
+        seer_updated_at = _format_requested_at(primary.get("updated_at")) or _format_requested_at(primary.get("created_at"))
         candidates.append({
             "tmdb_id": str(tmdb_id),
             "media_type": str(media_type),
             "title": primary.get("title") or f"tmdb:{tmdb_id}",
+            "seer_request_id": primary.get("id"),
+            "seer_request_status": primary.get("status"),
+            "seer_media_status": primary.get("media_status"),
             "seer_status": seer_status,
+            "seer_updated_at": seer_updated_at,
             "requested_at": min(timestamps) if timestamps else None,
             "seer_request_count": len(entries),
         })
     return candidates
+
+
+def _matches_status_filter(candidate: Dict[str, Any], status_filter: str) -> bool:
+    if status_filter == "pending":
+        return is_pending_status(candidate.get("seer_request_status"))
+    return True
+
+
+def _refresh_seer_state(db: DatabaseManager, candidate: Dict[str, Any]) -> None:
+    db.update_request_seer_state(
+        candidate["tmdb_id"],
+        candidate["media_type"],
+        seer_request_id=candidate.get("seer_request_id"),
+        seer_request_status=candidate.get("seer_request_status"),
+        seer_media_status=candidate.get("seer_media_status"),
+        seer_status=candidate.get("seer_status"),
+        seer_updated_at=candidate.get("seer_updated_at"),
+    )
 
 
 async def _ensure_metadata(
@@ -164,6 +187,7 @@ async def execute_seer_import_job(
     settings = db.get_seer_import_settings()
     enabled = settings.get("enabled")
     dry_run = settings.get("dry_run") if override_dry_run is None else bool(override_dry_run)
+    status_filter = settings.get("status_filter") or "all"
 
     if not enabled and not force_run:
         logger.debug("Seer request import disabled; skipping.")
@@ -193,7 +217,7 @@ async def execute_seer_import_job(
         False,
     )
 
-    would_import = would_adopt = imported = adopted = skipped = metadata_fallback = errors = 0
+    would_import = would_adopt = imported = adopted = refreshed = skipped = filtered = metadata_fallback = errors = 0
 
     try:
         index = await seer_client.get_requests_index()
@@ -202,19 +226,28 @@ async def execute_seer_import_job(
         candidates = _collect_import_candidates(index)
         logger.info(
             "Seer request import: %d unique media key(s), %d in Requests UI, "
-            "%d legacy Seer rows (dry_run=%s).",
+            "%d legacy Seer rows (dry_run=%s, status_filter=%s).",
             len(candidates),
             len(suggestarr_keys),
             len(legacy_seer_keys),
             dry_run,
+            status_filter,
         )
 
         for candidate in candidates:
             key: Tuple[str, str] = (candidate["media_type"], candidate["tmdb_id"])
             title = candidate["title"]
 
+            if not _matches_status_filter(candidate, status_filter):
+                filtered += 1
+                continue
+
             if key in suggestarr_keys:
-                skipped += 1
+                if not dry_run:
+                    _refresh_seer_state(db, candidate)
+                    refreshed += 1
+                else:
+                    skipped += 1
                 continue
 
             if key in legacy_seer_keys:
@@ -251,6 +284,7 @@ async def execute_seer_import_job(
                     legacy_seer_keys.discard(key)
                 else:
                     imported += 1
+                _refresh_seer_state(db, candidate)
                 suggestarr_keys.add(key)
             except Exception as exc:
                 errors += 1
@@ -279,13 +313,13 @@ async def execute_seer_import_job(
         changed = would_import + would_adopt
         summary = (
             f"candidates={len(candidates)} would_import={would_import} would_adopt={would_adopt} "
-            f"skipped_existing={skipped} metadata_fallback=0 errors={errors}"
+            f"filtered={filtered} skipped_existing={skipped} metadata_fallback=0 errors={errors}"
         )
     else:
-        changed = imported + adopted
+        changed = imported + adopted + refreshed
         summary = (
-            f"candidates={len(candidates)} imported={imported} adopted={adopted} "
-            f"skipped_existing={skipped} metadata_fallback={metadata_fallback} errors={errors}"
+            f"candidates={len(candidates)} imported={imported} adopted={adopted} refreshed={refreshed} "
+            f"filtered={filtered} skipped_existing={skipped} metadata_fallback={metadata_fallback} errors={errors}"
         )
 
     db.update_seer_import_settings(
@@ -302,7 +336,9 @@ async def execute_seer_import_job(
         "would_adopt": would_adopt,
         "imported": imported,
         "adopted": adopted,
+        "refreshed": refreshed,
         "skipped": skipped,
+        "filtered": filtered,
         "metadata_fallback": metadata_fallback,
         "errors": errors,
         "changed": changed,
