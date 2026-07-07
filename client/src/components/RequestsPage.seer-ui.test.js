@@ -29,6 +29,7 @@ test('request details modal renders Seer actions for selected and related reques
   assert.match(requestsPageSource, /useRequestSeerActions/);
   assert.match(requestsPageSource, /posterSeerProps/);
   assert.match(requestsPageSource, /prefetchPosterSeerStatuses\(mapped\)/);
+  assert.match(requestsPageSource, /seer_status: request\.seer_status/);
   assert.doesNotMatch(requestsPageSource, /@visible="onRequestCardVisible"/);
   assert.match(requestsPageSource, /seerStatusFilter/);
   assert.match(requestsPageSource, /SEER_STATUS_FILTER_OPTIONS/);

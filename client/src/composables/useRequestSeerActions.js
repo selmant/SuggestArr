@@ -91,7 +91,23 @@ export function useRequestSeerActions() {
     if (!key) {
       return false;
     }
-    return Boolean(seerStatusByRequest.value[key]) || isSeerStatusCacheFresh(statusCacheKeyFor(item));
+
+    const stored = item?.seer_status;
+    const live = seerStatusByRequest.value[key];
+    const cached = isSeerStatusCacheFresh(statusCacheKeyFor(item))
+      ? getCachedSeerStatus(statusCacheKeyFor(item))
+      : null;
+    const resolved = live || cached;
+
+    if (!resolved) {
+      return false;
+    }
+
+    if (stored && resolved.seer_status === 'not_found' && stored !== 'not_found') {
+      return false;
+    }
+
+    return true;
   }
 
   function rememberSeerStatus(item, status) {

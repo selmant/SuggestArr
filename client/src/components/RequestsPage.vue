@@ -738,6 +738,14 @@ export default {
         user_id: request.user_id,
         user_name: request.user_name,
         source_origin: request.source_origin,
+        seer_status: request.seer_status,
+        seer_request_status: request.seer_request_status,
+        seer_media_status: request.seer_media_status,
+        source_id: request.source_id,
+        source_title: request.source_title,
+        source_poster_path: request.source_poster_path,
+        source_backdrop_path: request.source_backdrop_path,
+        source_logo_path: request.source_logo_path,
       };
     },
 
