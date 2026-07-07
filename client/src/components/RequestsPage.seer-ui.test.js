@@ -34,6 +34,8 @@ test('request details modal renders Seer actions for selected and related reques
   assert.match(requestsPageSource, /loadSeerStatusFor\(request, \{ force: true \}\)/);
   assert.match(requestsPageSource, /syncListedRequestSeerStatus/);
   assert.match(requestsPageSource, /setSeerStatusChangeHandler/);
+  assert.match(seerActionsSource, /stored !== resolved\.seer_status/);
+  assert.match(seerActionsSource, /return item\?\.seer_status === 'pending'/);
   assert.match(seerActionsSource, /setSeerStatusChangeHandler/);
   assert.match(requestsPageSource, /seer_status: request\.seer_status/);
   assert.doesNotMatch(requestsPageSource, /@visible="onRequestCardVisible"/);

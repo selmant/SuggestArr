@@ -108,7 +108,11 @@ export function useRequestSeerActions() {
       return false;
     }
 
-    if (stored && resolved.seer_status === 'not_found' && stored !== 'not_found') {
+    if (stored && resolved.seer_status && stored !== resolved.seer_status) {
+      return false;
+    }
+
+    if (stored === 'pending' && resolved.seer_status === 'pending' && !resolved.can_action) {
       return false;
     }
 
@@ -174,7 +178,17 @@ export function useRequestSeerActions() {
   }
 
   function canActionSeer(item) {
-    return Boolean(getSeerStatus(item)?.can_action);
+    const status = getSeerStatus(item);
+    if (status) {
+      return Boolean(status.can_action);
+    }
+
+    const key = seerRequestKey(item);
+    if (seerStatusLoadingByRequest.value[key] || seerStatusErrorByRequest.value[key]) {
+      return false;
+    }
+
+    return item?.seer_status === 'pending';
   }
 
   function isSeerBusy(item) {
