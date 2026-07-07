@@ -146,7 +146,7 @@ export function useRequestSeerActions() {
       return seerStatusErrorByRequest.value[key];
     }
     const status = getSeerStatus(item);
-    return formatSeerStatusLabel(status?.seer_status || 'not_found');
+    return formatSeerStatusLabel(status?.seer_status || item?.seer_status || 'not_found');
   }
 
   function canActionSeer(item) {
@@ -392,7 +392,7 @@ export function useRequestSeerActions() {
     return {
       showSeerActions: canShowSeerActions(item),
       seerLabel: getSeerInlineLabel(item),
-      seerStatus: status?.seer_status || '',
+      seerStatus: status?.seer_status || item?.seer_status || '',
       seerBusy: isSeerBusy(item),
       seerCanAction: canActionSeer(item),
     };

@@ -65,6 +65,9 @@ class TestCleanupAutomationDeclineArchive(unittest.IsolatedAsyncioTestCase):
                 FakeDB.archived_rows.append((tmdb_id, media_type, reason))
                 return 1
 
+            def update_request_seer_state(self, *args, **kwargs):
+                return None
+
             def add_cleanup_log(self, **kwargs):
                 FakeDB.log_actions.append(kwargs["action"])
 
@@ -120,6 +123,9 @@ class TestCleanupAutomationDeclineArchive(unittest.IsolatedAsyncioTestCase):
 
             def archive_request_row(self, tmdb_id, media_type, reason='grace_cleanup'):
                 return 1
+
+            def update_request_seer_state(self, *args, **kwargs):
+                return None
 
             def add_cleanup_log(self, **kwargs):
                 FakeDB.log_actions.append(kwargs["action"])

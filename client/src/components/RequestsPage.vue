@@ -785,7 +785,7 @@ export default {
     },
 
     requestMatchesSeerStatusFilter(request) {
-      const status = this.getSeerStatus(request)?.seer_status;
+      const status = this.getSeerStatus(request)?.seer_status || request?.seer_status;
       return matchesSeerStatusFilter(status, this.seerStatusFilter);
     },
 
@@ -1078,6 +1078,7 @@ export default {
           this.flatRequests = [...this.flatRequests, ...mapped];
         }
         this.prefetchPosterTraktStatuses(mapped);
+        this.prefetchPosterSeerStatuses(mapped);
 
         this.flatCurrentPage = page;
         this.flatTotalPages = totalPages;

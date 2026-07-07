@@ -2171,6 +2171,7 @@ class DatabaseManager:
                 m.imdb_id, m.imdb_rating, m.imdb_votes, m.rt_rating, m.rt_user_rating, m.metacritic_rating,
                 m.trakt_rating, m.trakt_votes,
                 r.is_anime, r.user_id, u.user_name, r.source_origin,
+                r.seer_status, r.seer_request_status, r.seer_media_status,
                 COALESCE(s.media_id, r.tmdb_source_id, '0') AS source_id,
                 {source_title_expr} AS source_title,
                 s.poster_path AS source_poster_path,
@@ -2222,11 +2223,14 @@ class DatabaseManager:
                 "user_id": row[20] if len(row) > 20 else None,
                 "user_name": row[21] if len(row) > 21 else None,
                 "source_origin": row[22] if len(row) > 22 else None,
-                "source_id": row[23] if len(row) > 23 else None,
-                "source_title": row[24] if len(row) > 24 else None,
-                "source_poster_path": row[25] if len(row) > 25 else None,
-                "source_backdrop_path": row[26] if len(row) > 26 else None,
-                "source_logo_path": row[27] if len(row) > 27 else None,
+                "seer_status": row[23] if len(row) > 23 else None,
+                "seer_request_status": row[24] if len(row) > 24 else None,
+                "seer_media_status": row[25] if len(row) > 25 else None,
+                "source_id": row[26] if len(row) > 26 else None,
+                "source_title": row[27] if len(row) > 27 else None,
+                "source_poster_path": row[28] if len(row) > 28 else None,
+                "source_backdrop_path": row[29] if len(row) > 29 else None,
+                "source_logo_path": row[30] if len(row) > 30 else None,
             })
 
         total_pages = max(1, (total + per_page - 1) // per_page) if total else 0

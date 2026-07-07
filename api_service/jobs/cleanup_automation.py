@@ -15,7 +15,7 @@ from api_service.services.config_service import ConfigService
 from api_service.services.jellyfin.jellyfin_client import JellyfinClient
 from api_service.services.plex.plex_client import PlexClient
 from api_service.services.seer.seer_client import SeerClient
-from api_service.services.seer.seer_status import is_pending_status
+from api_service.services.seer.seer_status import derive_seer_status, is_pending_status, parse_seer_timestamp
 
 
 _run_lock = threading.Lock()
@@ -196,6 +196,54 @@ def _pending_seer_request_ids(seer_requests: List[Dict]) -> List[int]:
     return pending_ids
 
 
+def _format_seer_updated_at(entry: Dict) -> Optional[str]:
+    """Return UTC timestamp text for a Seer request entry."""
+    for field in ("updated_at", "created_at"):
+        parsed = parse_seer_timestamp(entry.get(field))
+        if parsed is not None:
+            return _format_utc_timestamp(parsed)
+    return None
+
+
+def _pick_primary_seer_entry(seer_requests: List[Dict]) -> Optional[Dict]:
+    """Prefer the latest pending Seer request entry when available."""
+    pending = [entry for entry in seer_requests if is_pending_status(entry.get("status"))]
+    if pending:
+        return pending[-1]
+    return seer_requests[-1] if seer_requests else None
+
+
+def _snapshot_seer_state(
+    db: DatabaseManager,
+    tmdb_id: str,
+    media_type: str,
+    seer_requests: List[Dict],
+) -> None:
+    """Persist the latest Seer status snapshot onto matching SuggestArr rows."""
+    primary = _pick_primary_seer_entry(seer_requests)
+    if not primary:
+        db.update_request_seer_state(
+            tmdb_id,
+            media_type,
+            seer_request_id=None,
+            seer_request_status=None,
+            seer_media_status=None,
+            seer_status="not_found",
+            seer_updated_at=_utcnow_for_db(),
+        )
+        return
+
+    db.update_request_seer_state(
+        tmdb_id,
+        media_type,
+        seer_request_id=primary.get("id"),
+        seer_request_status=primary.get("status"),
+        seer_media_status=primary.get("media_status"),
+        seer_status=derive_seer_status(primary.get("status"), primary.get("media_status")),
+        seer_updated_at=_format_seer_updated_at(primary) or _utcnow_for_db(),
+    )
+
+
 async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optional[bool] = None) -> Dict:
     """Run the cleanup pass.
 
@@ -341,6 +389,8 @@ async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optiona
                                reason='No matching Seer request record; archiving SuggestArr row only.')
 
         try:
+            if not dry_run:
+                _snapshot_seer_state(db, tmdb_id, media_type, seer_requests)
             archived_count = db.archive_request_row(tmdb_id, media_type, reason=ARCHIVE_REASON)
             if archived_count:
                 archived += archived_count

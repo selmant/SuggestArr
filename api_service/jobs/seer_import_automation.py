@@ -238,16 +238,18 @@ async def execute_seer_import_job(
             key: Tuple[str, str] = (candidate["media_type"], candidate["tmdb_id"])
             title = candidate["title"]
 
-            if not _matches_status_filter(candidate, status_filter):
-                filtered += 1
-                continue
-
             if key in suggestarr_keys:
                 if not dry_run:
                     _refresh_seer_state(db, candidate)
                     refreshed += 1
                 else:
                     skipped += 1
+
+            if not _matches_status_filter(candidate, status_filter):
+                filtered += 1
+                continue
+
+            if key in suggestarr_keys:
                 continue
 
             if key in legacy_seer_keys:
