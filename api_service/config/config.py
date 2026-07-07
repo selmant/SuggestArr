@@ -21,6 +21,9 @@ INTEGRATION_TO_FLAT: dict = {
     'omdb':     {'api_key': 'OMDB_API_KEY'},
     'openai':   {'api_key': 'OPENAI_API_KEY', 'base_url': 'OPENAI_BASE_URL', 'model': 'LLM_MODEL'},
     'trakt':    {'client_id': 'TRAKT_CLIENT_ID', 'client_secret': 'TRAKT_CLIENT_SECRET'},
+    'ntfy':     {'server_url': 'NTFY_SERVER_URL', 'topic': 'NTFY_TOPIC',
+                 'access_token': 'NTFY_ACCESS_TOKEN', 'username': 'NTFY_USERNAME',
+                 'password': 'NTFY_PASSWORD'},
 }
 
 _CONFIG_CACHE_LOCK = threading.Lock()
@@ -248,6 +251,16 @@ def get_default_values():
         'AUTH_MODE': lambda: 'enabled',
         'AUTH_TRUSTED_CIDRS': lambda: '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7',
         'AUTH_BYPASS_USERNAME': lambda: 'local_admin',
+        'NTFY_ENABLED': lambda: False,
+        'NTFY_SERVER_URL': lambda: 'https://ntfy.sh',
+        'NTFY_TOPIC': lambda: '',
+        'NTFY_ACCESS_TOKEN': lambda: '',
+        'NTFY_USERNAME': lambda: '',
+        'NTFY_PASSWORD': lambda: '',
+        'NTFY_NOTIFY_ON_SUCCESS': lambda: False,
+        'NTFY_NOTIFY_ON_FAILURE': lambda: True,
+        'NTFY_NOTIFY_ON_SKIPPED': lambda: True,
+        'NTFY_NOTIFY_ON_QUEUE_FAILURE': lambda: True,
     }
 
 def get_config_values():
@@ -335,6 +348,10 @@ def get_config_sections():
                     'SEER_SESSION_TOKEN', 'SEER_ANIME_PROFILE_CONFIG', 'SEER_REQUEST_DELAY',
                     'TRAKT_CLIENT_ID', 'TRAKT_CLIENT_SECRET', 'TRAKT_ACCESS_TOKEN',
                     'TRAKT_REFRESH_TOKEN', 'TRAKT_EXPIRES_AT',
+                    'NTFY_ENABLED', 'NTFY_SERVER_URL', 'NTFY_TOPIC', 'NTFY_ACCESS_TOKEN',
+                    'NTFY_USERNAME', 'NTFY_PASSWORD', 'NTFY_NOTIFY_ON_SUCCESS',
+                    'NTFY_NOTIFY_ON_FAILURE', 'NTFY_NOTIFY_ON_SKIPPED',
+                    'NTFY_NOTIFY_ON_QUEUE_FAILURE',
                     'SELECTED_USERS'],
         'database': ['DB_TYPE', 'DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME',
                     'DB_MIN_CONNECTIONS', 'DB_MAX_CONNECTIONS', 'DB_MAX_IDLE_TIME', 

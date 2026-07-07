@@ -921,6 +921,16 @@ export default {
               DB_PASSWORD: config.DB_PASSWORD,
             };
             break;
+          case 'ntfy':
+            endpoint = '/api/config/test-ntfy';
+            payload = {
+              NTFY_SERVER_URL: config.NTFY_SERVER_URL,
+              NTFY_TOPIC: config.NTFY_TOPIC,
+              NTFY_ACCESS_TOKEN: config.NTFY_ACCESS_TOKEN,
+              NTFY_USERNAME: config.NTFY_USERNAME,
+              NTFY_PASSWORD: config.NTFY_PASSWORD,
+            };
+            break;
           default:
             throw new Error('Unknown service');
         }

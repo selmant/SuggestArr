@@ -12,6 +12,7 @@ from api_service.config.logger_manager import LoggerManager
 from api_service.services.config_service import ConfigService
 from api_service.db.database_manager import DatabaseManager
 from api_service.services.seer.seer_client import SeerClient
+from api_service.services.notifications.notification_service import NotificationService
 from api_service.utils.asyncio_loop import close_event_loop
 
 MAX_RETRIES = 5
@@ -85,6 +86,9 @@ async def _run_worker() -> int:
                     media_type, tmdb_id, row_id, exc,
                 )
                 db.mark_pending_failed(row_id, retry_count)
+                NotificationService().notify_queue_permanent_failure(
+                    media_type, tmdb_id, retry_count,
+                )
                 continue
 
             # Skip if the item was submitted by another path while it sat in the queue
@@ -125,6 +129,9 @@ async def _run_worker() -> int:
                     db.mark_pending_failed(row_id, new_retry)
                     logger.error(
                         "Queue worker: %s tmdb:%s permanently failed after %d retries.",
+                        media_type, tmdb_id, new_retry,
+                    )
+                    NotificationService().notify_queue_permanent_failure(
                         media_type, tmdb_id, new_retry,
                     )
                 else:

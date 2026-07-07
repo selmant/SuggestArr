@@ -85,6 +85,15 @@ class TestConfig(unittest.TestCase):
         "ENABLE_VISUAL_EFFECTS": False,
         "ENABLE_STATIC_BACKGROUND": False,
         "STATIC_BACKGROUND_COLOR": "#000000",
+        "SHOW_RATING_TMDB": True,
+        "SHOW_RATING_IMDB": True,
+        "SHOW_RATING_RT": True,
+        "SHOW_RATING_RT_USER": True,
+        "SHOW_RATING_METACRITIC": True,
+        "SHOW_RATING_TRAKT_USER": True,
+        "SHOW_RATING_TRAKT_COMMUNITY": True,
+        "RATINGS_CACHE_TTL_HOURS": 168,
+        "MDBLIST_API_KEY": "",
         "OMDB_API_KEY": "omdb123abc",
         "FILTER_RATING_SOURCE": "TMDB",
         "FILTER_IMDB_THRESHOLD": "7.0",
@@ -103,6 +112,16 @@ class TestConfig(unittest.TestCase):
         "AUTH_MODE": "enabled",
         "AUTH_TRUSTED_CIDRS": "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7",
         "AUTH_BYPASS_USERNAME": "local_admin",
+        "NTFY_ENABLED": False,
+        "NTFY_SERVER_URL": "https://ntfy.sh",
+        "NTFY_TOPIC": "",
+        "NTFY_ACCESS_TOKEN": "",
+        "NTFY_USERNAME": "",
+        "NTFY_PASSWORD": "",
+        "NTFY_NOTIFY_ON_SUCCESS": False,
+        "NTFY_NOTIFY_ON_FAILURE": True,
+        "NTFY_NOTIFY_ON_SKIPPED": True,
+        "NTFY_NOTIFY_ON_QUEUE_FAILURE": True,
     }
 
     def setUp(self):
@@ -208,6 +227,161 @@ class TestConfig(unittest.TestCase):
             'client_id': 'TRAKT_CLIENT_ID',
             'client_secret': 'TRAKT_CLIENT_SECRET',
         })
+
+    def test_ntfy_defaults_and_integration_mapping_are_present(self):
+        defaults = get_config_values()
+        self.assertFalse(defaults['NTFY_ENABLED'])
+        self.assertEqual(defaults['NTFY_SERVER_URL'], 'https://ntfy.sh')
+        self.assertEqual(defaults['NTFY_TOPIC'], '')
+        self.assertFalse(defaults['NTFY_NOTIFY_ON_SUCCESS'])
+        self.assertTrue(defaults['NTFY_NOTIFY_ON_FAILURE'])
+        self.assertTrue(defaults['NTFY_NOTIFY_ON_SKIPPED'])
+        self.assertTrue(defaults['NTFY_NOTIFY_ON_QUEUE_FAILURE'])
+        self.assertEqual(INTEGRATION_TO_FLAT['ntfy'], {
+            'server_url': 'NTFY_SERVER_URL',
+            'topic': 'NTFY_TOPIC',
+            'access_token': 'NTFY_ACCESS_TOKEN',
+            'username': 'NTFY_USERNAME',
+            'password': 'NTFY_PASSWORD',
+        })
+        services = get_config_sections()['services']
+        for key in (
+            'NTFY_ENABLED', 'NTFY_SERVER_URL', 'NTFY_TOPIC', 'NTFY_ACCESS_TOKEN',
+            'NTFY_USERNAME', 'NTFY_PASSWORD', 'NTFY_NOTIFY_ON_SUCCESS',
+            'NTFY_NOTIFY_ON_FAILURE', 'NTFY_NOTIFY_ON_SKIPPED',
+            'NTFY_NOTIFY_ON_QUEUE_FAILURE',
+        ):
+            self.assertIn(key, services)
+
+    def test_config_service_classifies_ntfy_keys_as_db_integration_keys(self):
+        for key in (
+            'NTFY_SERVER_URL',
+            'NTFY_TOPIC',
+            'NTFY_ACCESS_TOKEN',
+            'NTFY_USERNAME',
+            'NTFY_PASSWORD',
+        ):
+            self.assertIn(key, config_service._DB_INTEGRATION_KEYS)
+            self.assertNotIn(key, config_service._VALID_SETTING_KEYS)
+        for key in (
+            'NTFY_ENABLED',
+            'NTFY_NOTIFY_ON_SUCCESS',
+            'NTFY_NOTIFY_ON_FAILURE',
+            'NTFY_NOTIFY_ON_SKIPPED',
+            'NTFY_NOTIFY_ON_QUEUE_FAILURE',
+        ):
+            self.assertNotIn(key, config_service._DB_INTEGRATION_KEYS)
+            self.assertIn(key, config_service._VALID_SETTING_KEYS)
+
+    def test_config_export_redacts_ntfy_secrets_by_default(self):
+        self._db_manager_cls.return_value.get_all_integrations.return_value = {
+            'ntfy': {
+                'server_url': 'https://ntfy.example.com',
+                'topic': 'alerts',
+                'access_token': 'secret-token',
+                'username': 'admin',
+                'password': 'secret-password',
+            },
+        }
+
+        exported = config_service.ConfigService.export_config()
+
+        ntfy = exported['integrations']['ntfy']
+        self.assertEqual(ntfy['server_url'], 'https://ntfy.example.com')
+        self.assertEqual(ntfy['topic'], 'alerts')
+        self.assertEqual(ntfy['access_token'], '***')
+        self.assertEqual(ntfy['username'], 'admin')
+        self.assertEqual(ntfy['password'], '***')
+
+    def test_ntfy_is_valid_when_server_url_and_topic_are_present(self):
+        self.assertTrue(DatabaseManager._is_integration_valid(
+            'ntfy',
+            {'server_url': 'https://ntfy.sh', 'topic': 'alerts'},
+        ))
+        self.assertFalse(DatabaseManager._is_integration_valid(
+            'ntfy',
+            {'server_url': 'https://ntfy.sh', 'topic': ''},
+        ))
+
+    def test_config_test_ntfy_success(self):
+        from api_service.blueprints.config.routes import config_bp
+        from flask import Flask, g
+
+        app = Flask(__name__)
+        app.config['TESTING'] = True
+
+        @app.before_request
+        def inject_caller():
+            g.current_user = {'username': 'admin', 'role': 'admin'}
+
+        app.register_blueprint(config_bp, url_prefix='/api/config')
+
+        with patch('api_service.blueprints.config.routes.load_env_vars', return_value={}), \
+             patch('api_service.blueprints.config.routes.NotificationService') as mock_service_cls:
+            mock_service_cls.return_value.send_test_notification.return_value = {
+                'status': 'success',
+                'message': 'Test notification sent successfully.',
+            }
+            response = app.test_client().post('/api/config/test-ntfy', json={
+                'NTFY_SERVER_URL': 'https://ntfy.sh',
+                'NTFY_TOPIC': 'alerts',
+            })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['status'], 'success')
+
+    def test_config_test_ntfy_validation_error(self):
+        from api_service.blueprints.config.routes import config_bp
+        from flask import Flask, g
+
+        app = Flask(__name__)
+        app.config['TESTING'] = True
+
+        @app.before_request
+        def inject_caller():
+            g.current_user = {'username': 'admin', 'role': 'admin'}
+
+        app.register_blueprint(config_bp, url_prefix='/api/config')
+
+        with patch('api_service.blueprints.config.routes.load_env_vars', return_value={}), \
+             patch('api_service.blueprints.config.routes.NotificationService') as mock_service_cls:
+            mock_service_cls.return_value.send_test_notification.return_value = {
+                'status': 'error',
+                'message': 'NTFY_TOPIC is required.',
+            }
+            response = app.test_client().post('/api/config/test-ntfy', json={
+                'NTFY_SERVER_URL': 'https://ntfy.sh',
+            })
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['message'], 'NTFY_TOPIC is required.')
+
+    def test_config_test_ntfy_http_failure(self):
+        from api_service.blueprints.config.routes import config_bp
+        from flask import Flask, g
+
+        app = Flask(__name__)
+        app.config['TESTING'] = True
+
+        @app.before_request
+        def inject_caller():
+            g.current_user = {'username': 'admin', 'role': 'admin'}
+
+        app.register_blueprint(config_bp, url_prefix='/api/config')
+
+        with patch('api_service.blueprints.config.routes.load_env_vars', return_value={}), \
+             patch('api_service.blueprints.config.routes.NotificationService') as mock_service_cls:
+            mock_service_cls.return_value.send_test_notification.return_value = {
+                'status': 'error',
+                'message': 'ntfy publish failed (403): forbidden',
+            }
+            response = app.test_client().post('/api/config/test-ntfy', json={
+                'NTFY_SERVER_URL': 'https://ntfy.sh',
+                'NTFY_TOPIC': 'alerts',
+            })
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('403', response.get_json()['message'])
 
     def test_trakt_is_valid_when_client_credentials_are_present(self):
         self.assertTrue(DatabaseManager._is_integration_valid(

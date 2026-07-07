@@ -370,6 +370,18 @@ class JobRepository:
 
             self.logger.debug(f"Updated execution history record ID: {exec_id}")
 
+        try:
+            from api_service.services.notifications.notification_service import NotificationService
+            NotificationService().notify_execution_end(
+                exec_id,
+                status,
+                results_count=results_count,
+                requested_count=requested_count,
+                error_message=error_message,
+            )
+        except Exception as exc:
+            self.logger.warning("ntfy notification failed (non-fatal): %s", exc)
+
     def get_job_history(self, job_id: int, limit: int = 50) -> List[Dict[str, Any]]:
         """
         Retrieve execution history for a specific job.

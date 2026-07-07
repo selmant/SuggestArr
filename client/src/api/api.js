@@ -12,6 +12,10 @@ export const testOmdbApi = (apiKey) => {
     return axios.post('/api/omdb/test', { api_key: apiKey });
 };
 
+export const testNtfyApi = (payload) => {
+    return axios.post('/api/config/test-ntfy', payload);
+};
+
 // Function to test Jellyfin configuration
 export const testJellyfinApi = (url, token) => {
     const jellyfinApiUrl = `${url}/Users`; // Endpoint to retrieve Jellyfin users

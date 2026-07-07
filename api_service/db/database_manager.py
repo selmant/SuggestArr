@@ -32,6 +32,7 @@ _INTEGRATION_REQUIRED_FIELDS: Dict[str, List[str]] = {
     'tmdb':     ['api_key'],
     'omdb':     ['api_key'],
     'trakt':    ['client_id', 'client_secret'],
+    'ntfy':     ['server_url', 'topic'],
     # OpenAI/LLM: no hard required fields - either api_key (cloud) or base_url (local) is sufficient.
     # An existing row (even empty) is considered valid to prevent overwriting user configuration.
     'openai':   [],
@@ -1075,6 +1076,13 @@ class DatabaseManager:
             'trakt': {
                 'client_id': env_vars.get('TRAKT_CLIENT_ID', ''),
                 'client_secret': env_vars.get('TRAKT_CLIENT_SECRET', ''),
+            },
+            'ntfy': {
+                'server_url': env_vars.get('NTFY_SERVER_URL', ''),
+                'topic': env_vars.get('NTFY_TOPIC', ''),
+                'access_token': env_vars.get('NTFY_ACCESS_TOKEN', ''),
+                'username': env_vars.get('NTFY_USERNAME', ''),
+                'password': env_vars.get('NTFY_PASSWORD', ''),
             },
         }
 

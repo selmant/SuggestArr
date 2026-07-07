@@ -11,6 +11,7 @@ from api_service.config.config import (
 from api_service.config.logger_manager import LoggerManager
 from api_service.db.database_manager import DatabaseManager
 from api_service.services.config_service import ConfigService
+from api_service.services.notifications.notification_service import NotificationService
 
 logger = LoggerManager.get_logger("ConfigRoute")
 config_bp = Blueprint('config', __name__)
@@ -23,6 +24,7 @@ _SECRET_KEYS = frozenset({
     'DB_PASSWORD',
     'OPENAI_API_KEY',
     'TRAKT_CLIENT_SECRET', 'TRAKT_ACCESS_TOKEN', 'TRAKT_REFRESH_TOKEN',
+    'NTFY_ACCESS_TOKEN', 'NTFY_PASSWORD',
 })
 
 _REDACTED = "***"
@@ -182,6 +184,22 @@ def test_db_connection():
     except Exception as e:
         logger.error(f'Error testing database connection: {str(e)}', exc_info=True)
         return jsonify({'message': 'Error testing database connection', 'status': 'error'}), 500
+
+@config_bp.route('/test-ntfy', methods=['POST'])
+@require_role('admin')
+def test_ntfy():
+    """
+    Send a test notification to the configured ntfy server/topic.
+    """
+    try:
+        body = request.json or {}
+        merged = _merge_secrets(body, load_env_vars())
+        result = NotificationService().send_test_notification(merged)
+        status_code = 200 if result['status'] == 'success' else 400
+        return jsonify(result), status_code
+    except Exception as e:
+        logger.error(f'Error testing ntfy notification: {str(e)}', exc_info=True)
+        return jsonify({'message': 'Error testing ntfy notification', 'status': 'error'}), 500
 
 @config_bp.route('/sections', methods=['GET'])
 @require_role('admin')

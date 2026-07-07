@@ -397,6 +397,148 @@
         </div>
       </div>
 
+      <!-- ntfy Notifications -->
+      <div v-if="!wizardMode" class="service-card">
+        <div class="service-header">
+          <h3><i class="fas fa-bell"></i> ntfy Notifications</h3>
+          <span class="status-badge" :class="getNtfyStatus">
+            <span class="status-dot"></span>
+            {{ getNtfyStatusText }}
+          </span>
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input
+              v-model="localConfig.NTFY_ENABLED"
+              type="checkbox"
+              :disabled="isLoading"
+            />
+            Enable ntfy notifications
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label for="ntfyServerUrl">Server URL</label>
+          <input
+            id="ntfyServerUrl"
+            v-model="localConfig.NTFY_SERVER_URL"
+            type="url"
+            placeholder="https://ntfy.sh"
+            class="form-control"
+            :disabled="isLoading"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="ntfyTopic">Topic</label>
+          <input
+            id="ntfyTopic"
+            v-model="localConfig.NTFY_TOPIC"
+            type="text"
+            placeholder="arr"
+            class="form-control"
+            :disabled="isLoading"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="ntfyAuthMode">Authentication</label>
+          <select
+            id="ntfyAuthMode"
+            v-model="ntfyAuthMode"
+            class="form-control"
+            :disabled="isLoading"
+          >
+            <option value="none">None (public topic)</option>
+            <option value="token">Bearer token</option>
+            <option value="basic">Basic auth</option>
+          </select>
+        </div>
+
+        <div v-if="ntfyAuthMode === 'token'" class="form-group">
+          <label for="ntfyAccessToken">Access Token</label>
+          <div class="input-group">
+            <input
+              id="ntfyAccessToken"
+              v-model="localConfig.NTFY_ACCESS_TOKEN"
+              :type="showNtfyToken ? 'text' : 'password'"
+              placeholder="Bearer token"
+              class="form-control"
+              :disabled="isLoading"
+            />
+            <button @click="showNtfyToken = !showNtfyToken" type="button" class="btn btn-outline btn-sm" :disabled="isLoading">
+              <i :class="showNtfyToken ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+            </button>
+          </div>
+        </div>
+
+        <template v-if="ntfyAuthMode === 'basic'">
+          <div class="form-group">
+            <label for="ntfyUsername">Username</label>
+            <input
+              id="ntfyUsername"
+              v-model="localConfig.NTFY_USERNAME"
+              type="text"
+              placeholder="admin"
+              class="form-control"
+              :disabled="isLoading"
+            />
+          </div>
+          <div class="form-group">
+            <label for="ntfyPassword">Password</label>
+            <div class="input-group">
+              <input
+                id="ntfyPassword"
+                v-model="localConfig.NTFY_PASSWORD"
+                :type="showNtfyPassword ? 'text' : 'password'"
+                placeholder="Password"
+                class="form-control"
+                :disabled="isLoading"
+              />
+              <button @click="showNtfyPassword = !showNtfyPassword" type="button" class="btn btn-outline btn-sm" :disabled="isLoading">
+                <i :class="showNtfyPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input v-model="localConfig.NTFY_NOTIFY_ON_SUCCESS" type="checkbox" :disabled="isLoading" />
+            Notify on job success
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input v-model="localConfig.NTFY_NOTIFY_ON_FAILURE" type="checkbox" :disabled="isLoading" />
+            Notify on job failure
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input v-model="localConfig.NTFY_NOTIFY_ON_SKIPPED" type="checkbox" :disabled="isLoading" />
+            Notify on skipped jobs
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input v-model="localConfig.NTFY_NOTIFY_ON_QUEUE_FAILURE" type="checkbox" :disabled="isLoading" />
+            Notify on permanent queue failures
+          </label>
+        </div>
+
+        <button
+          @click="testNtfyConnection"
+          class="btn btn-outline btn-block"
+          :disabled="isLoading || !localConfig.NTFY_SERVER_URL || !localConfig.NTFY_TOPIC || isNtfyTesting"
+        >
+          <i v-if="isNtfyTesting" class="fas fa-spinner fa-spin"></i>
+          <i v-else class="fas fa-paper-plane"></i>
+          {{ isNtfyTesting ? 'Sending...' : 'Send Test Notification' }}
+        </button>
+      </div>
+
       <!-- Seer  -->
       <div v-if="showSection('seer')" :class="wizardMode ? '' : 'service-card'">
         <div v-if="!wizardMode" class="service-header">
@@ -634,6 +776,9 @@ export default {
       showJellyfinToken: false,
       showSeerToken: false,
       showTraktClientSecret: false,
+      showNtfyToken: false,
+      showNtfyPassword: false,
+      ntfyAuthMode: 'none',
       // Wizard-mode self-contained TMDB test state
       wizardTmdbTesting: false,
       wizardTmdbConnected: false,
@@ -814,6 +959,27 @@ export default {
       if (this.localConfig.TRAKT_CLIENT_ID || this.localConfig.TRAKT_CLIENT_SECRET) return 'Incomplete';
       return 'Not Set';
     },
+    getNtfyStatus() {
+      if (this.localConfig.NTFY_ENABLED && this.localConfig.NTFY_SERVER_URL && this.localConfig.NTFY_TOPIC) {
+        return 'status-connected';
+      }
+      if (this.localConfig.NTFY_SERVER_URL || this.localConfig.NTFY_TOPIC || this.localConfig.NTFY_ENABLED) {
+        return 'status-warning';
+      }
+      return 'status-disconnected';
+    },
+    getNtfyStatusText() {
+      if (this.localConfig.NTFY_ENABLED && this.localConfig.NTFY_SERVER_URL && this.localConfig.NTFY_TOPIC) {
+        return 'Enabled';
+      }
+      if (this.localConfig.NTFY_SERVER_URL || this.localConfig.NTFY_TOPIC || this.localConfig.NTFY_ENABLED) {
+        return 'Incomplete';
+      }
+      return 'Disabled';
+    },
+    isNtfyTesting() {
+      return this.testingConnections?.ntfy || false;
+    },
     seerUserOptions() {
       return this.seerUsers.map(user => ({
         label: `${user.name}${user.email ? ` (${user.email})` : ''}`,
@@ -886,6 +1052,7 @@ export default {
       handler(newConfig) {
         this.localConfig = { ...newConfig };
         this.originalConfig = { ...newConfig };
+        this._syncNtfyAuthModeFromConfig();
         this.loadSavedSeerState();
       },
     },
@@ -1441,6 +1608,27 @@ export default {
       return current;
     },
 
+    _syncNtfyAuthModeFromConfig() {
+      if (this.localConfig.NTFY_ACCESS_TOKEN) {
+        this.ntfyAuthMode = 'token';
+      } else if (this.localConfig.NTFY_USERNAME || this.localConfig.NTFY_PASSWORD) {
+        this.ntfyAuthMode = 'basic';
+      } else {
+        this.ntfyAuthMode = 'none';
+      }
+    },
+
+    testNtfyConnection() {
+      const payload = {
+        NTFY_SERVER_URL: this.localConfig.NTFY_SERVER_URL,
+        NTFY_TOPIC: this.localConfig.NTFY_TOPIC,
+        NTFY_ACCESS_TOKEN: this._secretValue('NTFY_ACCESS_TOKEN') || '',
+        NTFY_USERNAME: this.localConfig.NTFY_USERNAME || '',
+        NTFY_PASSWORD: this._secretValue('NTFY_PASSWORD') || '',
+      };
+      this.$emit('test-connection', 'ntfy', payload);
+    },
+
     async saveSettings() {
       try {
         const dataToSave = {
@@ -1449,6 +1637,22 @@ export default {
           SELECTED_SERVICE: this.localConfig.SELECTED_SERVICE,
           TRAKT_CLIENT_ID: this.localConfig.TRAKT_CLIENT_ID || '',
           TRAKT_CLIENT_SECRET: this._secretValue('TRAKT_CLIENT_SECRET') || '',
+          NTFY_ENABLED: !!this.localConfig.NTFY_ENABLED,
+          NTFY_SERVER_URL: this.localConfig.NTFY_SERVER_URL || '',
+          NTFY_TOPIC: this.localConfig.NTFY_TOPIC || '',
+          NTFY_ACCESS_TOKEN: this.ntfyAuthMode === 'token'
+            ? (this._secretValue('NTFY_ACCESS_TOKEN') || '')
+            : '',
+          NTFY_USERNAME: this.ntfyAuthMode === 'basic'
+            ? (this.localConfig.NTFY_USERNAME || '')
+            : '',
+          NTFY_PASSWORD: this.ntfyAuthMode === 'basic'
+            ? (this._secretValue('NTFY_PASSWORD') || '')
+            : '',
+          NTFY_NOTIFY_ON_SUCCESS: !!this.localConfig.NTFY_NOTIFY_ON_SUCCESS,
+          NTFY_NOTIFY_ON_FAILURE: !!this.localConfig.NTFY_NOTIFY_ON_FAILURE,
+          NTFY_NOTIFY_ON_SKIPPED: !!this.localConfig.NTFY_NOTIFY_ON_SKIPPED,
+          NTFY_NOTIFY_ON_QUEUE_FAILURE: !!this.localConfig.NTFY_NOTIFY_ON_QUEUE_FAILURE,
         };
         if (this.localConfig.SELECTED_SERVICE === 'plex') {
           Object.assign(dataToSave, {
@@ -1485,6 +1689,16 @@ export default {
         TMDB_API_KEY: '', OMDB_API_KEY: '', SELECTED_SERVICE: '', PLEX_TOKEN: '', PLEX_API_URL: '', PLEX_LIBRARIES: [],
         JELLYFIN_API_URL: '', JELLYFIN_TOKEN: '', JELLYFIN_LIBRARIES: [],
         TRAKT_CLIENT_ID: '', TRAKT_CLIENT_SECRET: '',
+        NTFY_ENABLED: false,
+        NTFY_SERVER_URL: 'https://ntfy.sh',
+        NTFY_TOPIC: '',
+        NTFY_ACCESS_TOKEN: '',
+        NTFY_USERNAME: '',
+        NTFY_PASSWORD: '',
+        NTFY_NOTIFY_ON_SUCCESS: false,
+        NTFY_NOTIFY_ON_FAILURE: true,
+        NTFY_NOTIFY_ON_SKIPPED: true,
+        NTFY_NOTIFY_ON_QUEUE_FAILURE: true,
         SEER_API_URL: '', SEER_TOKEN: '', SEER_USER_NAME: null, SEER_USER_PSW: null,
         SEER_SESSION_TOKEN: null, SEER_ANIME_PROFILE_CONFIG: {}, SEER_REQUEST_DELAY: 2, SELECTED_USERS: [],
       };

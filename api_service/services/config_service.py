@@ -43,6 +43,11 @@ _DB_INTEGRATION_KEYS: frozenset = frozenset({
     'LLM_MODEL',
     'TRAKT_CLIENT_ID',
     'TRAKT_CLIENT_SECRET',
+    'NTFY_SERVER_URL',
+    'NTFY_TOPIC',
+    'NTFY_ACCESS_TOKEN',
+    'NTFY_USERNAME',
+    'NTFY_PASSWORD',
 })
 
 _TRAKT_ACCOUNT_TOKEN_SETTING_KEYS: frozenset = frozenset({
