@@ -45,8 +45,10 @@ test('request details modal renders Trakt actions for selected and related reque
 test('all requests view prefetches Trakt statuses after loading flat requests', () => {
   assert.match(
     requestsPageSource,
-    /this\.prefetchPosterTraktStatuses\(mapped\);/,
+    /this\.prefetchPosterTraktStatuses\(mapped, \{ force: true \}\);/,
   );
+  assert.match(requestsPageSource, /loadTraktStatusForSource\(source, \{ force: true \}\)/);
+  assert.match(requestsPageSource, /loadTraktStatusFor\(request, \{ force: true \}\)/);
 });
 
 test('Trakt star rating uses a dedicated half-star icon for clearer half ratings', () => {

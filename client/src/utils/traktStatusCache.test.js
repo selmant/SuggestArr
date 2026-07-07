@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   clearTraktStatusCache,
   getCachedTraktStatus,
+  invalidateTraktStatusCacheForItem,
   isTraktStatusCacheFresh,
   setCachedTraktStatus,
   traktStatusCacheKey,
@@ -19,4 +20,17 @@ test('trakt status cache stores and expires entries by key', () => {
 
   clearTraktStatusCache();
   assert.equal(getCachedTraktStatus(key), null);
+});
+
+test('trakt status cache can invalidate a single item', () => {
+  clearTraktStatusCache();
+  const key = traktStatusCacheKey('jf-1', '550', 'movie');
+  const otherKey = traktStatusCacheKey('jf-1', '551', 'movie');
+  setCachedTraktStatus(key, { watched: true });
+  setCachedTraktStatus(otherKey, { watched: false });
+
+  invalidateTraktStatusCacheForItem('jf-1', '550', 'movie');
+
+  assert.equal(getCachedTraktStatus(key), null);
+  assert.deepEqual(getCachedTraktStatus(otherKey), { watched: false });
 });

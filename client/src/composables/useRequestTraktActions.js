@@ -10,6 +10,7 @@ import {
 import { formatTraktStars, starsFromTraktStatus } from '@/utils/traktRating.js';
 import {
   getCachedTraktStatus,
+  invalidateTraktStatusCacheForItem,
   isTraktStatusCacheFresh,
   setCachedTraktStatus,
   traktStatusCacheKey,
@@ -60,6 +61,17 @@ export function useRequestTraktActions() {
       traktRequestKey(item),
       item.media_type,
     );
+  }
+
+  function invalidateTraktStatusForItem(item) {
+    if (!item?.request_id || !item?.media_type) {
+      return;
+    }
+    const userId = resolveTraktUserId(item);
+    if (!userId) {
+      return;
+    }
+    invalidateTraktStatusCacheForItem(userId, item.request_id, item.media_type);
   }
 
   function hasFreshTraktStatus(item) {
@@ -232,6 +244,9 @@ export function useRequestTraktActions() {
     if (!canShowRelatedTrakt(item)) return;
 
     const key = traktRequestKey(item);
+    if (force) {
+      invalidateTraktStatusForItem(item);
+    }
     if (!force && hasFreshTraktStatus(item)) {
       const cached = getCachedTraktStatus(statusCacheKeyFor(item));
       if (cached) {
@@ -245,7 +260,7 @@ export function useRequestTraktActions() {
     traktStatusErrorByRequest.value = { ...traktStatusErrorByRequest.value, [key]: '' };
     try {
       const response = await getRequestTraktStatus(item.request_id, item.media_type, userId);
-      applyTraktStatusFor(item, response.data);
+      applyTraktStatusFor(item, response.data, { merge: false });
     } catch (error) {
       applyTraktStatusFor(item, null, { merge: false });
       traktStatusErrorByRequest.value = {
@@ -264,6 +279,9 @@ export function useRequestTraktActions() {
       return;
     }
 
+    if (force) {
+      invalidateTraktStatusForItem(target);
+    }
     if (!force && hasFreshTraktStatus(target)) {
       applyTraktStatus(getTraktStatus(target), { merge: false });
       return;
@@ -277,8 +295,8 @@ export function useRequestTraktActions() {
         target.media_type,
         resolveTraktUserId(target),
       );
-      applyTraktStatus(response.data);
-      applyTraktStatusFor(target, response.data);
+      applyTraktStatus(response.data, { merge: false });
+      applyTraktStatusFor(target, response.data, { merge: false });
     } catch (error) {
       applyTraktStatus(null, { merge: false });
       traktStatusError.value = error.response?.data?.message || 'Trakt unavailable';
@@ -354,9 +372,9 @@ export function useRequestTraktActions() {
     }
   }
 
-  function prefetchPosterTraktStatuses(requests) {
+  function prefetchPosterTraktStatuses(requests, { force = false } = {}) {
     for (const item of (requests || [])) {
-      queuePosterTraktStatus(item);
+      queuePosterTraktStatus(item, { force });
     }
   }
 
@@ -401,21 +419,27 @@ export function useRequestTraktActions() {
     }
   }
 
-  function queuePosterTraktStatus(item) {
-    if (!canShowRelatedTrakt(item) || hasFreshTraktStatus(item)) {
+  function queuePosterTraktStatus(item, { force = false } = {}) {
+    if (force) {
+      invalidateTraktStatusForItem(item);
+    }
+    if (!force && (!canShowRelatedTrakt(item) || hasFreshTraktStatus(item))) {
       const cached = getCachedTraktStatus(statusCacheKeyFor(item));
       if (cached) {
         applyTraktStatusFor(item, cached, { merge: false });
       }
       return;
     }
+    if (!canShowRelatedTrakt(item)) {
+      return;
+    }
     queuedPosterItems.set(traktRequestKey(item), item);
     schedulePosterTraktFlush();
   }
 
-  async function prefetchPosterTraktStatusesAsync(requests) {
+  async function prefetchPosterTraktStatusesAsync(requests, { force = false } = {}) {
     for (const item of (requests || [])) {
-      queuePosterTraktStatus(item);
+      queuePosterTraktStatus(item, { force });
     }
     await flushPosterTraktQueue();
   }

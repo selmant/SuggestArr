@@ -52,6 +52,15 @@ export function setCachedTraktStatus(key, status) {
 
 /**
  * @param {string} userId
+ * @param {string} tmdbId
+ * @param {string} mediaType
+ */
+export function invalidateTraktStatusCacheForItem(userId, tmdbId, mediaType) {
+  cache.delete(traktStatusCacheKey(userId, tmdbId, mediaType));
+}
+
+/**
+ * @param {string} userId
  */
 export function invalidateTraktStatusCacheForUser(userId) {
   const prefix = `${userId}:`;

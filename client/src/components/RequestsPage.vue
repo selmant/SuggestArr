@@ -1086,7 +1086,7 @@ export default {
         } else {
           this.flatRequests = [...this.flatRequests, ...mapped];
         }
-        this.prefetchPosterTraktStatuses(mapped);
+        this.prefetchPosterTraktStatuses(mapped, { force: true });
         this.prefetchPosterSeerStatuses(mapped);
 
         this.flatCurrentPage = page;
