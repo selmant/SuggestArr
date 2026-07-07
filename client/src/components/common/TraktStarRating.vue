@@ -18,14 +18,11 @@
         :aria-label="`Rate ${index} out of 5 stars`"
         @mousemove="onMove(index, $event)"
         @click="onClick(index, $event)">
-        <span class="trakt-stars__glyph trakt-stars__glyph--empty" aria-hidden="true">
-          <i class="far fa-star"></i>
-        </span>
         <span
-          class="trakt-stars__glyph trakt-stars__glyph--fill"
-          :style="{ width: `${fillPercent(index)}%` }"
+          class="trakt-stars__glyph"
+          :class="`trakt-stars__glyph--${starState(index)}`"
           aria-hidden="true">
-          <i class="fas fa-star"></i>
+          <i :class="starIconClass(index)"></i>
         </span>
       </button>
     </div>
@@ -79,15 +76,25 @@ export default {
     },
   },
   methods: {
-    fillPercent(index) {
+    starState(index) {
       const diff = this.effectiveValue - (index - 1);
       if (diff >= 1) {
-        return 100;
+        return 'full';
       }
       if (diff >= 0.5) {
-        return 50;
+        return 'half';
       }
-      return 0;
+      return 'empty';
+    },
+    starIconClass(index) {
+      const state = this.starState(index);
+      if (state === 'full') {
+        return 'fas fa-star';
+      }
+      if (state === 'half') {
+        return 'fas fa-star-half-alt';
+      }
+      return 'far fa-star';
     },
     valueFromEvent(index, event) {
       const rect = event.currentTarget.getBoundingClientRect();

@@ -48,3 +48,9 @@ test('all requests view prefetches Trakt statuses after loading flat requests', 
     /this\.prefetchPosterTraktStatuses\(mapped\);/,
   );
 });
+
+test('Trakt star rating uses a dedicated half-star icon for clearer half ratings', () => {
+  assert.match(traktStarRatingSource, /starIconClass\(index\)/);
+  assert.match(traktStarRatingSource, /fa-star-half-alt/);
+  assert.doesNotMatch(traktStarRatingSource, /width: `\$\{fillPercent\(index\)\}%`/);
+});
