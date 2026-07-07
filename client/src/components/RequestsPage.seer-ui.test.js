@@ -6,6 +6,7 @@ const requestsPageSource = readFileSync(new URL('./RequestsPage.vue', import.met
 const detailsModalSource = readFileSync(new URL('./common/RequestDetailsModal.vue', import.meta.url), 'utf8');
 const requestPosterCardSource = readFileSync(new URL('./common/RequestPosterCard.vue', import.meta.url), 'utf8');
 const seerActionsSource = readFileSync(new URL('../composables/useRequestSeerActions.js', import.meta.url), 'utf8');
+const traktActionsSource = readFileSync(new URL('../composables/useRequestTraktActions.js', import.meta.url), 'utf8');
 
 test('request details modal renders Seer actions for selected and related requests', () => {
   assert.match(requestsPageSource, /:seer-modal-target="getSeerModalTarget\(selectedSource\)"/);
@@ -28,12 +29,13 @@ test('request details modal renders Seer actions for selected and related reques
   assert.match(requestPosterCardSource, /seer-poster-dock/);
   assert.match(requestsPageSource, /useRequestSeerActions/);
   assert.match(requestsPageSource, /posterSeerProps/);
-  assert.match(requestsPageSource, /prefetchPosterSeerStatuses\(mapped\)/);
+  assert.match(requestsPageSource, /prefetchRequestIntegrationStatusesAsync/);
   assert.match(requestsPageSource, /refreshModalIntegrationStatuses/);
   assert.match(requestsPageSource, /loadSeerStatusForSource\(source, \{ force: true \}\)/);
   assert.match(requestsPageSource, /loadSeerStatusFor\(request, \{ force: true \}\)/);
-  assert.match(requestsPageSource, /syncListedRequestSeerStatus/);
-  assert.match(requestsPageSource, /setSeerStatusChangeHandler/);
+  assert.match(seerActionsSource, /const overflow = allPending\.slice\(POSTER_BATCH_SIZE\)/);
+  assert.match(traktActionsSource, /const overflow = \[\]/);
+  assert.match(traktActionsSource, /overflow\.push\(item\)/);
   assert.match(seerActionsSource, /stored !== resolved\.seer_status/);
   assert.match(seerActionsSource, /return item\?\.seer_status === 'pending'/);
   assert.match(seerActionsSource, /setSeerStatusChangeHandler/);

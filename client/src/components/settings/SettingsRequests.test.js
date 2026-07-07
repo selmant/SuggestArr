@@ -19,7 +19,7 @@ test('recent requests and requests page reuse RequestPosterCard', () => {
   assert.match(settingsRequestsSource, /import RequestDetailsModal from '@\/components\/common\/RequestDetailsModal.vue';/);
   assert.match(settingsRequestsSource, /posterTraktProps\(request\)/);
   assert.match(settingsRequestsSource, /useRequestTraktActions/);
-  assert.match(settingsRequestsSource, /prefetchPosterTraktStatuses\(this\.recentRequests, \{ force: true \}\)/);
+  assert.match(settingsRequestsSource, /prefetchPosterTraktStatusesAsync\(this\.recentRequests, \{ force: true \}\)/);
   assert.match(settingsRequestsSource, /loadTraktStatusForSource\(this\.selectedRequest, \{ force: true \}\)/);
   assert.match(settingsRequestsSource, /goToRequestsPage\(\) \{/);
   assert.match(settingsRequestsSource, /source_id: source\.source_id/);

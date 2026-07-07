@@ -10,4 +10,6 @@ test('trakt actions support forced refresh on load and modal fetch paths', () =>
   assert.match(traktActionsSource, /if \(force\) \{[\s\S]*invalidateTraktStatusForItem\(item\)/);
   assert.match(traktActionsSource, /applyTraktStatusFor\(item, response\.data, \{ merge: false \}\)/);
   assert.match(traktActionsSource, /applyTraktStatus\(response\.data, \{ merge: false \}\)/);
+  assert.match(traktActionsSource, /overflow\.push\(item\)/);
+  assert.match(traktActionsSource, /connected\.length > 0/);
 });

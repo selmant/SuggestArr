@@ -307,9 +307,17 @@ export function useRequestSeerActions() {
   }
 
   async function flushPosterSeerQueue() {
-    const pending = [...queuedPosterItems.values()].slice(0, POSTER_BATCH_SIZE);
+    const allPending = [...queuedPosterItems.values()];
+    const pending = allPending.slice(0, POSTER_BATCH_SIZE);
+    const overflow = allPending.slice(POSTER_BATCH_SIZE);
     queuedPosterItems.clear();
+    for (const item of overflow) {
+      queuedPosterItems.set(seerRequestKey(item), item);
+    }
     if (!pending.length) {
+      if (queuedPosterItems.size > 0) {
+        schedulePosterSeerFlush();
+      }
       return;
     }
     if (batchPrefetchPromise) {
@@ -459,6 +467,7 @@ export function useRequestSeerActions() {
     approveForSource,
     declineForSource,
     prefetchPosterSeerStatuses,
+    prefetchPosterSeerStatusesAsync,
     queuePosterSeerStatus,
     posterSeerProps,
     applySeerStatus,

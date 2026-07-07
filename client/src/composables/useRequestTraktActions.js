@@ -35,6 +35,7 @@ export function useRequestTraktActions() {
   const traktStatusErrorByRequest = ref({});
 
   const batchPrefetchByUser = new Map();
+  let batchPrefetchPromise = null;
   const queuedPosterItems = new Map();
   let posterFlushTimer = null;
   const POSTER_BATCH_SIZE = 16;
@@ -150,7 +151,7 @@ export function useRequestTraktActions() {
     try {
       const response = await listTraktMediaUsers();
       const connected = (response.data?.media_users || []).filter((user) => user.trakt?.connected);
-      if (connected.length === 1) {
+      if (connected.length > 0) {
         defaultTraktUserId.value = String(connected[0].external_user_id || '');
       }
     } catch (error) {
@@ -396,23 +397,47 @@ export function useRequestTraktActions() {
     }
 
     const pendingByUser = new Map();
+    const overflow = [];
+
     for (const item of pending) {
       const userId = resolveTraktUserId(item);
+      if (!userId) {
+        continue;
+      }
       if (!pendingByUser.has(userId)) {
         pendingByUser.set(userId, []);
       }
       const bucket = pendingByUser.get(userId);
-      if (bucket.length < POSTER_BATCH_SIZE && !bucket.some((entry) => entry.request_id === item.request_id)) {
+      const alreadyQueued = bucket.some((entry) => String(entry.request_id) === String(item.request_id));
+      if (alreadyQueued) {
+        continue;
+      }
+      if (bucket.length < POSTER_BATCH_SIZE) {
         bucket.push(item);
+      } else {
+        overflow.push(item);
       }
     }
 
-    await Promise.all([...pendingByUser.entries()].map(async ([userId, items]) => {
+    for (const item of overflow) {
+      queuedPosterItems.set(traktRequestKey(item), item);
+    }
+
+    if (batchPrefetchPromise) {
+      await batchPrefetchPromise;
+    }
+
+    batchPrefetchPromise = Promise.all([...pendingByUser.entries()].map(async ([userId, items]) => {
       if (!items.length) {
         return;
       }
       await fetchBatchStatuses(userId, items);
     }));
+    try {
+      await batchPrefetchPromise;
+    } finally {
+      batchPrefetchPromise = null;
+    }
 
     if (queuedPosterItems.size > 0) {
       schedulePosterTraktFlush();

@@ -844,6 +844,7 @@ export default {
       if (source.has_more_requests && !source.requestsFullyLoaded) {
         await this.loadAllSourceRequests(source);
       }
+      await this.prefetchRequestIntegrationStatusesAsync(source.requests || []);
     },
 
     async loadAllSourceRequests(source) {
@@ -874,6 +875,7 @@ export default {
         }
         source.requestsFullyLoaded = true;
         source.has_more_requests = false;
+        await this.prefetchRequestIntegrationStatusesAsync(source.requests || []);
       } catch (error) {
         console.error('Failed to load remaining source requests:', error);
         this.$toast.open({
@@ -966,6 +968,9 @@ export default {
         }
         this.aiRequestsPage = page;
         this.aiRequestsTotalPages = total_pages;
+        if (data?.length) {
+          await this.prefetchRequestIntegrationStatusesAsync(data);
+        }
         this.$nextTick(() => {
           setTimeout(() => this.initAiObserver(), 150);
         });
@@ -1086,8 +1091,7 @@ export default {
         } else {
           this.flatRequests = [...this.flatRequests, ...mapped];
         }
-        this.prefetchPosterTraktStatuses(mapped, { force: true });
-        this.prefetchPosterSeerStatuses(mapped);
+        await this.prefetchRequestIntegrationStatusesAsync(mapped);
 
         this.flatCurrentPage = page;
         this.flatTotalPages = totalPages;
@@ -1159,6 +1163,11 @@ export default {
         this.totalPages = total_pages;
         this.currentPage = page;
 
+        const nestedRequests = newSources.flatMap((source) => source.requests || []);
+        if (nestedRequests.length) {
+          await this.prefetchRequestIntegrationStatusesAsync(nestedRequests);
+        }
+
         this.$nextTick(() => {
           setTimeout(() => {
             this.initObserver();
@@ -1180,6 +1189,18 @@ export default {
 
     goHome() {
       this.$router.push({ name: "Home" });
+    },
+
+    prefetchRequestIntegrationStatuses(requests, { forceTrakt = true } = {}) {
+      this.prefetchPosterTraktStatuses(requests, { force: forceTrakt });
+      this.prefetchPosterSeerStatuses(requests);
+    },
+
+    async prefetchRequestIntegrationStatusesAsync(requests, { forceTrakt = true } = {}) {
+      await Promise.all([
+        this.prefetchPosterTraktStatusesAsync(requests, { force: forceTrakt }),
+        this.prefetchPosterSeerStatusesAsync(requests),
+      ]);
     },
 
     syncListedRequestSeerStatus(item, status) {
