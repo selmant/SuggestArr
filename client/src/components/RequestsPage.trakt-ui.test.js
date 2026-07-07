@@ -47,6 +47,10 @@ test('all requests view prefetches Trakt statuses after loading flat requests', 
     requestsPageSource,
     /void this\.prefetchRequestIntegrationStatusesAsync\(mapped\)/,
   );
+  assert.match(requestsPageSource, /await this\.loadTraktDefaults\(\)/);
+  assert.match(requestsPageSource, /silent: true/);
+  assert.match(requestsPageSource, /showInitialLoader/);
+  assert.match(requestsPageSource, /load-more-trigger--idle/);
   assert.match(requestsPageSource, /loadTraktStatusForSource\(source, \{ force: true \}\)/);
   assert.match(requestsPageSource, /loadTraktStatusFor\(request, \{ force: true \}\)/);
 });

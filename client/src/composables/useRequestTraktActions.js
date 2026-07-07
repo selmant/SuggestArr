@@ -23,6 +23,7 @@ import {
  */
 export function useRequestTraktActions() {
   const defaultTraktUserId = ref('');
+  const connectedTraktUserIds = ref(new Set());
   const traktStatus = ref(null);
   const traktStatusLoading = ref(false);
   const traktActionLoading = ref(false);
@@ -38,8 +39,14 @@ export function useRequestTraktActions() {
   let batchPrefetchPromise = null;
   const queuedPosterItems = new Map();
   let posterFlushTimer = null;
+  let posterPrefetchSilent = false;
   const POSTER_BATCH_SIZE = 16;
   const POSTER_FLUSH_MS = 120;
+  const SILENT_STATUS_FLUSH_MS = 120;
+  let silentStatusFlushTimer = null;
+  let pendingSilentStatuses = {};
+  let pendingSilentStars = {};
+  let posterSilentPrefetchDepth = 0;
 
   let modalTargetResolver = () => null;
 
@@ -103,10 +110,16 @@ export function useRequestTraktActions() {
   }
 
   function resolveTraktUserId(item) {
-    const explicit = item?.user_id;
-    if (explicit) {
-      return String(explicit);
+    const externalUserId = item?.external_user_id;
+    if (externalUserId) {
+      return String(externalUserId);
     }
+
+    const requestUserId = item?.user_id;
+    if (requestUserId && connectedTraktUserIds.value.has(String(requestUserId))) {
+      return String(requestUserId);
+    }
+
     return defaultTraktUserId.value || '';
   }
 
@@ -151,8 +164,13 @@ export function useRequestTraktActions() {
     try {
       const response = await listTraktMediaUsers();
       const connected = (response.data?.media_users || []).filter((user) => user.trakt?.connected);
+      connectedTraktUserIds.value = new Set(
+        connected.map((user) => String(user.external_user_id || '')).filter(Boolean),
+      );
       if (connected.length > 0) {
         defaultTraktUserId.value = String(connected[0].external_user_id || '');
+      } else {
+        defaultTraktUserId.value = '';
       }
     } catch (error) {
       console.warn('Could not load Trakt media users for request actions:', error);
@@ -338,26 +356,98 @@ export function useRequestTraktActions() {
     }
   }
 
-  async function fetchBatchStatuses(userId, items) {
+  function queueSilentTraktStatusUpdates(statuses, stars) {
+    pendingSilentStatuses = { ...pendingSilentStatuses, ...statuses };
+    pendingSilentStars = { ...pendingSilentStars, ...stars };
+    if (!silentStatusFlushTimer) {
+      silentStatusFlushTimer = setTimeout(flushSilentTraktStatusUpdates, SILENT_STATUS_FLUSH_MS);
+    }
+  }
+
+  function flushSilentTraktStatusUpdates() {
+    silentStatusFlushTimer = null;
+    if (!Object.keys(pendingSilentStatuses).length) {
+      return;
+    }
+
+    traktStatusByRequest.value = {
+      ...traktStatusByRequest.value,
+      ...pendingSilentStatuses,
+    };
+    traktRatingStarsByRequest.value = {
+      ...traktRatingStarsByRequest.value,
+      ...pendingSilentStars,
+    };
+    pendingSilentStatuses = {};
+    pendingSilentStars = {};
+  }
+
+  function flushSilentTraktStatusUpdatesNow() {
+    if (silentStatusFlushTimer) {
+      clearTimeout(silentStatusFlushTimer);
+      silentStatusFlushTimer = null;
+    }
+    flushSilentTraktStatusUpdates();
+  }
+
+  function isPosterSilentPrefetchActive() {
+    return posterSilentPrefetchDepth > 0;
+  }
+
+  async function fetchBatchStatuses(userId, items, { silent = false } = {}) {
     const keys = items.map((item) => traktRequestKey(item));
-    const loadingState = { ...traktStatusLoadingByRequest.value };
-    const errorState = { ...traktStatusErrorByRequest.value };
-    keys.forEach((key) => {
-      loadingState[key] = true;
-      errorState[key] = '';
-    });
-    traktStatusLoadingByRequest.value = loadingState;
-    traktStatusErrorByRequest.value = errorState;
+    if (!silent) {
+      const loadingState = { ...traktStatusLoadingByRequest.value };
+      const errorState = { ...traktStatusErrorByRequest.value };
+      keys.forEach((key) => {
+        loadingState[key] = true;
+        errorState[key] = '';
+      });
+      traktStatusLoadingByRequest.value = loadingState;
+      traktStatusErrorByRequest.value = errorState;
+    }
 
     try {
       const response = await getRequestTraktStatusesBatch(userId, items.map((item) => ({
         tmdb_id: item.request_id,
         media_type: item.media_type,
       })));
+      const batchStatuses = {};
+      const batchStars = {};
+      const modalTarget = getModalTarget();
+
       for (const status of response.data?.statuses || []) {
-        applyTraktStatusFor(itemFromStatus(status), status, { merge: false });
+        const item = itemFromStatus(status);
+        const key = traktRequestKey(item);
+        if (!key) {
+          continue;
+        }
+        batchStatuses[key] = status || null;
+        batchStars[key] = starsFromTraktStatus(status);
+        if (item?.request_id) {
+          rememberTraktStatus(item, status);
+        }
+        if (modalTarget?.request_id === item.request_id) {
+          applyTraktStatus(status, { merge: false });
+        }
+      }
+
+      if (silent) {
+        queueSilentTraktStatusUpdates(batchStatuses, batchStars);
+      } else {
+        traktStatusByRequest.value = {
+          ...traktStatusByRequest.value,
+          ...batchStatuses,
+        };
+        traktRatingStarsByRequest.value = {
+          ...traktRatingStarsByRequest.value,
+          ...batchStars,
+        };
       }
     } catch (error) {
+      if (silent) {
+        return;
+      }
       const message = error.response?.data?.message || 'Unavailable';
       const nextErrors = { ...traktStatusErrorByRequest.value };
       keys.forEach((key) => {
@@ -365,11 +455,13 @@ export function useRequestTraktActions() {
       });
       traktStatusErrorByRequest.value = nextErrors;
     } finally {
-      const nextLoading = { ...traktStatusLoadingByRequest.value };
-      keys.forEach((key) => {
-        nextLoading[key] = false;
-      });
-      traktStatusLoadingByRequest.value = nextLoading;
+      if (!silent) {
+        const nextLoading = { ...traktStatusLoadingByRequest.value };
+        keys.forEach((key) => {
+          nextLoading[key] = false;
+        });
+        traktStatusLoadingByRequest.value = nextLoading;
+      }
     }
   }
 
@@ -385,11 +477,11 @@ export function useRequestTraktActions() {
     }
     posterFlushTimer = setTimeout(() => {
       posterFlushTimer = null;
-      void flushPosterTraktQueue();
+      void flushPosterTraktQueue({ silent: posterPrefetchSilent });
     }, POSTER_FLUSH_MS);
   }
 
-  async function flushPosterTraktQueue() {
+  async function flushPosterTraktQueue({ silent = false } = {}) {
     const pending = [...queuedPosterItems.values()];
     queuedPosterItems.clear();
     if (!pending.length) {
@@ -431,7 +523,7 @@ export function useRequestTraktActions() {
       if (!items.length) {
         return;
       }
-      await fetchBatchStatuses(userId, items);
+      await fetchBatchStatuses(userId, items, { silent });
     }));
     try {
       await batchPrefetchPromise;
@@ -462,11 +554,38 @@ export function useRequestTraktActions() {
     schedulePosterTraktFlush();
   }
 
-  async function prefetchPosterTraktStatusesAsync(requests, { force = false } = {}) {
-    for (const item of (requests || [])) {
-      queuePosterTraktStatus(item, { force });
+  async function drainPosterTraktQueue({ silent = false } = {}) {
+    await flushPosterTraktQueue({ silent });
+    if (posterFlushTimer) {
+      await new Promise((resolve) => setTimeout(resolve, POSTER_FLUSH_MS + 20));
     }
-    await flushPosterTraktQueue();
+    if (batchPrefetchPromise) {
+      await batchPrefetchPromise;
+    }
+    if (queuedPosterItems.size > 0 || posterFlushTimer) {
+      await drainPosterTraktQueue({ silent });
+    }
+  }
+
+  async function prefetchPosterTraktStatusesAsync(requests, { force = false, silent = false } = {}) {
+    posterPrefetchSilent = silent;
+    if (silent) {
+      posterSilentPrefetchDepth += 1;
+    }
+    try {
+      for (const item of (requests || [])) {
+        queuePosterTraktStatus(item, { force });
+      }
+      await drainPosterTraktQueue({ silent });
+      if (silent) {
+        flushSilentTraktStatusUpdatesNow();
+      }
+    } finally {
+      if (silent) {
+        posterSilentPrefetchDepth = Math.max(0, posterSilentPrefetchDepth - 1);
+      }
+      posterPrefetchSilent = false;
+    }
   }
 
   async function rateSelectedOnTraktForSource(source) {
@@ -548,7 +667,7 @@ export function useRequestTraktActions() {
       showTraktActions: canShowRelatedTrakt(item),
       traktLabel: getTraktInlineLabel(item),
       traktWatched: Boolean(getTraktStatus(item)?.watched),
-      traktBusy: isTraktBusy(item),
+      traktBusy: !isPosterSilentPrefetchActive() && isTraktBusy(item),
       traktRatingStars: getTraktRatingStars(item),
     };
   }

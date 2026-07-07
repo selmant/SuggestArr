@@ -473,6 +473,11 @@
   color: var(--color-text-muted);
 }
 
+.load-more-trigger--idle {
+  min-height: 1px;
+  padding: 1rem 0;
+}
+
 .spinner-small {
   width: 30px;
   height: 30px;

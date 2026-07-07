@@ -34,8 +34,13 @@ export function useRequestSeerActions() {
   let batchPrefetchPromise = null;
   const queuedPosterItems = new Map();
   let posterFlushTimer = null;
+  let posterPrefetchSilent = false;
   const POSTER_BATCH_SIZE = 16;
   const POSTER_FLUSH_MS = 120;
+  const SILENT_STATUS_FLUSH_MS = 120;
+  let silentStatusFlushTimer = null;
+  let pendingSilentStatuses = {};
+  let posterSilentPrefetchDepth = 0;
 
   function setModalTargetResolver(resolver) {
     modalTargetResolver = typeof resolver === 'function' ? resolver : () => null;
@@ -255,26 +260,89 @@ export function useRequestSeerActions() {
     }
   }
 
-  async function fetchBatchStatuses(items) {
+  function queueSilentSeerStatusUpdates(statuses) {
+    pendingSilentStatuses = { ...pendingSilentStatuses, ...statuses };
+    if (!silentStatusFlushTimer) {
+      silentStatusFlushTimer = setTimeout(flushSilentSeerStatusUpdates, SILENT_STATUS_FLUSH_MS);
+    }
+  }
+
+  function flushSilentSeerStatusUpdates() {
+    silentStatusFlushTimer = null;
+    if (!Object.keys(pendingSilentStatuses).length) {
+      return;
+    }
+
+    seerStatusByRequest.value = {
+      ...seerStatusByRequest.value,
+      ...pendingSilentStatuses,
+    };
+    pendingSilentStatuses = {};
+  }
+
+  function flushSilentSeerStatusUpdatesNow() {
+    if (silentStatusFlushTimer) {
+      clearTimeout(silentStatusFlushTimer);
+      silentStatusFlushTimer = null;
+    }
+    flushSilentSeerStatusUpdates();
+  }
+
+  function isPosterSilentPrefetchActive() {
+    return posterSilentPrefetchDepth > 0;
+  }
+
+  async function fetchBatchStatuses(items, { silent = false } = {}) {
     const keys = items.map((item) => seerRequestKey(item));
-    const loadingState = { ...seerStatusLoadingByRequest.value };
-    const errorState = { ...seerStatusErrorByRequest.value };
-    keys.forEach((key) => {
-      loadingState[key] = true;
-      errorState[key] = '';
-    });
-    seerStatusLoadingByRequest.value = loadingState;
-    seerStatusErrorByRequest.value = errorState;
+    if (!silent) {
+      const loadingState = { ...seerStatusLoadingByRequest.value };
+      const errorState = { ...seerStatusErrorByRequest.value };
+      keys.forEach((key) => {
+        loadingState[key] = true;
+        errorState[key] = '';
+      });
+      seerStatusLoadingByRequest.value = loadingState;
+      seerStatusErrorByRequest.value = errorState;
+    }
 
     try {
       const response = await getRequestSeerStatusesBatch(items.map((item) => ({
         tmdb_id: item.request_id,
         media_type: item.media_type,
       })));
+      const batchStatuses = {};
+      const modalTarget = getModalTarget();
+
       for (const status of response.data?.statuses || []) {
-        applySeerStatusFor(itemFromStatus(status), status, { merge: false });
+        const item = itemFromStatus(status);
+        const key = seerRequestKey(item);
+        if (!key) {
+          continue;
+        }
+        batchStatuses[key] = status || null;
+        if (item?.request_id) {
+          rememberSeerStatus(item, status);
+        }
+        if (seerStatusChangeHandler) {
+          seerStatusChangeHandler(item, status);
+        }
+        if (modalTarget?.request_id === item.request_id) {
+          applySeerStatus(status, { merge: false });
+        }
+      }
+
+      if (silent) {
+        queueSilentSeerStatusUpdates(batchStatuses);
+      } else {
+        seerStatusByRequest.value = {
+          ...seerStatusByRequest.value,
+          ...batchStatuses,
+        };
       }
     } catch (error) {
+      if (silent) {
+        return;
+      }
       const message = error.response?.data?.message || 'Unavailable';
       const nextErrors = { ...seerStatusErrorByRequest.value };
       keys.forEach((key) => {
@@ -282,11 +350,13 @@ export function useRequestSeerActions() {
       });
       seerStatusErrorByRequest.value = nextErrors;
     } finally {
-      const nextLoading = { ...seerStatusLoadingByRequest.value };
-      keys.forEach((key) => {
-        nextLoading[key] = false;
-      });
-      seerStatusLoadingByRequest.value = nextLoading;
+      if (!silent) {
+        const nextLoading = { ...seerStatusLoadingByRequest.value };
+        keys.forEach((key) => {
+          nextLoading[key] = false;
+        });
+        seerStatusLoadingByRequest.value = nextLoading;
+      }
     }
   }
 
@@ -302,11 +372,11 @@ export function useRequestSeerActions() {
     }
     posterFlushTimer = setTimeout(() => {
       posterFlushTimer = null;
-      void flushPosterSeerQueue();
+      void flushPosterSeerQueue({ silent: posterPrefetchSilent });
     }, POSTER_FLUSH_MS);
   }
 
-  async function flushPosterSeerQueue() {
+  async function flushPosterSeerQueue({ silent = false } = {}) {
     const allPending = [...queuedPosterItems.values()];
     const pending = allPending.slice(0, POSTER_BATCH_SIZE);
     const overflow = allPending.slice(POSTER_BATCH_SIZE);
@@ -323,7 +393,7 @@ export function useRequestSeerActions() {
     if (batchPrefetchPromise) {
       await batchPrefetchPromise;
     }
-    batchPrefetchPromise = fetchBatchStatuses(pending);
+    batchPrefetchPromise = fetchBatchStatuses(pending, { silent });
     try {
       await batchPrefetchPromise;
     } finally {
@@ -346,11 +416,38 @@ export function useRequestSeerActions() {
     schedulePosterSeerFlush();
   }
 
-  async function prefetchPosterSeerStatusesAsync(requests) {
-    for (const item of (requests || [])) {
-      queuePosterSeerStatus(item);
+  async function drainPosterSeerQueue({ silent = false } = {}) {
+    await flushPosterSeerQueue({ silent });
+    if (posterFlushTimer) {
+      await new Promise((resolve) => setTimeout(resolve, POSTER_FLUSH_MS + 20));
     }
-    await flushPosterSeerQueue();
+    if (batchPrefetchPromise) {
+      await batchPrefetchPromise;
+    }
+    if (queuedPosterItems.size > 0 || posterFlushTimer) {
+      await drainPosterSeerQueue({ silent });
+    }
+  }
+
+  async function prefetchPosterSeerStatusesAsync(requests, { silent = false } = {}) {
+    posterPrefetchSilent = silent;
+    if (silent) {
+      posterSilentPrefetchDepth += 1;
+    }
+    try {
+      for (const item of (requests || [])) {
+        queuePosterSeerStatus(item);
+      }
+      await drainPosterSeerQueue({ silent });
+      if (silent) {
+        flushSilentSeerStatusUpdatesNow();
+      }
+    } finally {
+      if (silent) {
+        posterSilentPrefetchDepth = Math.max(0, posterSilentPrefetchDepth - 1);
+      }
+      posterPrefetchSilent = false;
+    }
   }
 
   async function approveFor(item) {
@@ -437,8 +534,8 @@ export function useRequestSeerActions() {
       showSeerActions: canShowSeerActions(item),
       seerLabel: getSeerInlineLabel(item),
       seerStatus: status?.seer_status || item?.seer_status || '',
-      seerBusy: isSeerBusy(item),
-      seerCanAction: canActionSeer(item),
+      seerBusy: !isPosterSilentPrefetchActive() && isSeerBusy(item),
+      seerCanAction: !isPosterSilentPrefetchActive() && canActionSeer(item),
     };
   }
 

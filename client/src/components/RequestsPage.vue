@@ -140,6 +140,12 @@
         </div>
 
         <!-- View: By Content Watched -->
+        <div v-if="showInitialLoader" class="loading-initial">
+          <div class="spinner"></div>
+          <p>Loading your requests...</p>
+        </div>
+
+        <template v-else>
         <transition name="fade-slide" mode="out-in">
           <div v-if="viewMode === 'by-content'" key="by-content">
             <transition-group 
@@ -255,18 +261,21 @@
                 :show-missing-rating="false"
                 @select="openModal($event, true)" />
             </transition-group>
-            <div v-if="aiRequestsHasMore" ref="loadMoreTriggerAi" class="load-more-trigger">
-              <div class="spinner-small"></div>
-              <p>Loading more...</p>
+            <div
+              v-if="aiRequestsHasMore"
+              ref="loadMoreTriggerAi"
+              class="load-more-trigger"
+              :class="{ 'load-more-trigger--idle': !loading }">
+              <template v-if="loading">
+                <div class="spinner-small"></div>
+                <p>Loading more...</p>
+              </template>
             </div>
           </div>
 
           <!-- View: All Requests -->
           <div v-else-if="viewMode === 'all-requests'" key="all-requests">
-            <transition-group 
-              name="fade-slide" 
-              tag="div"
-              class="requests-grid">
+            <div class="requests-grid">
               <RequestPosterCard
                 v-for="request in filteredAndSortedRequests" 
                 :key="request.request_id"
@@ -279,7 +288,7 @@
                 @approve-seer="approveFor(request)"
                 @decline-seer="declineFor(request)"
                 @select="openModal" />
-            </transition-group>
+            </div>
 
 
           </div>
@@ -329,9 +338,12 @@
         <div
           v-if="hasMoreData && viewMode !== 'ai-requests' && viewMode !== 'archived'"
           :ref="viewMode === 'by-content' ? 'loadMoreTrigger' : 'loadMoreTriggerRequests'"
-          class="load-more-trigger">
-          <div class="spinner-small"></div>
-          <p>Loading more requests...</p>
+          class="load-more-trigger"
+          :class="{ 'load-more-trigger--idle': !loading }">
+          <template v-if="loading">
+            <div class="spinner-small"></div>
+            <p>Loading more requests...</p>
+          </template>
         </div>
         <!-- No Results -->
         <div v-if="viewMode === 'archived' && filteredArchivedRequests.length === 0 && !loading" class="no-results">
@@ -348,9 +360,12 @@
         <div
           v-if="hasMoreData && viewMode === 'archived'"
           ref="loadMoreTriggerArchived"
-          class="load-more-trigger">
-          <div class="spinner-small"></div>
-          <p>Loading more archived requests...</p>
+          class="load-more-trigger"
+          :class="{ 'load-more-trigger--idle': !loading }">
+          <template v-if="loading">
+            <div class="spinner-small"></div>
+            <p>Loading more archived requests...</p>
+          </template>
         </div>
         <div v-if="viewMode === 'ai-requests' && filteredAiRequests.length === 0 && !loading" class="no-results">
           <i class="fas fa-magic text-6xl mb-4"></i>
@@ -358,11 +373,7 @@
           <p>Use the <strong>AI Search</strong> tab to discover and request content.</p>
         </div>
 
-        <!-- Initial Loading -->
-        <div v-if="loading && isInitialLoad" class="loading-initial">
-          <div class="spinner"></div>
-          <p>Loading your requests...</p>
-        </div>
+        </template>
 
         <Footer />
       </div>
@@ -468,6 +479,7 @@ export default {
       showModal: false,
       selectedSource: null,
       loading: false,
+      hasCompletedInitialLoad: false,
       currentPage: 1,
       totalPages: 1,
       observer: null,
@@ -639,6 +651,10 @@ export default {
       return this.currentPage < this.totalPages;
     },
 
+    showInitialLoader() {
+      return !this.hasCompletedInitialLoad;
+    },
+
     isInitialLoad() {
       if (this.viewMode === 'ai-requests') {
         return this.aiRequests.length === 0;
@@ -712,6 +728,18 @@ export default {
       this.$nextTick(() => {
         this.initObserver();
       });
+    },
+
+    defaultTraktUserId(newUserId, oldUserId) {
+      if (!newUserId || newUserId === oldUserId) {
+        return;
+      }
+      const requests = this.viewMode === 'all-requests'
+        ? this.flatRequests
+        : this.allRequestsFlat;
+      if (requests.length > 0) {
+        void this.prefetchRequestIntegrationStatusesAsync(requests);
+      }
     },
   },
   methods: {
@@ -1111,6 +1139,9 @@ export default {
         });
       } finally {
         this.loading = false;
+        if (page === 1) {
+          this.hasCompletedInitialLoad = true;
+        }
       }
     },
 
@@ -1184,6 +1215,9 @@ export default {
         });
       } finally {
         this.loading = false;
+        if (page === 1) {
+          this.hasCompletedInitialLoad = true;
+        }
       }
     },
 
@@ -1201,9 +1235,10 @@ export default {
         return;
       }
       try {
+        await this.loadTraktDefaults();
         await Promise.all([
-          this.prefetchPosterTraktStatusesAsync(requests, { force: forceTrakt }),
-          this.prefetchPosterSeerStatusesAsync(requests),
+          this.prefetchPosterTraktStatusesAsync(requests, { force: forceTrakt, silent: true }),
+          this.prefetchPosterSeerStatusesAsync(requests, { silent: true }),
         ]);
       } catch (error) {
         console.warn('Could not prefetch request integration statuses:', error);

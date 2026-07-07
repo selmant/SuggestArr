@@ -12,4 +12,9 @@ test('trakt actions support forced refresh on load and modal fetch paths', () =>
   assert.match(traktActionsSource, /applyTraktStatus\(response\.data, \{ merge: false \}\)/);
   assert.match(traktActionsSource, /overflow\.push\(item\)/);
   assert.match(traktActionsSource, /connected\.length > 0/);
+  assert.match(traktActionsSource, /connectedTraktUserIds/);
+  assert.match(traktActionsSource, /external_user_id/);
+  assert.match(traktActionsSource, /\{ silent = false \}/);
+  assert.match(traktActionsSource, /queueSilentTraktStatusUpdates/);
+  assert.match(traktActionsSource, /isPosterSilentPrefetchActive/);
 });
