@@ -5,7 +5,12 @@
         v-if="show && selectedSource"
         class="request-details-modal"
         @click.self="$emit('close')">
-        <div class="request-details-modal__content">
+        <div v-if="!isModalReady" class="request-details-modal__loading" @click.stop>
+          <i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i>
+          <span>Loading details...</span>
+        </div>
+
+        <div v-else class="request-details-modal__content">
           <div v-if="displayBackdrop" class="request-details-modal__hero">
             <img
               :src="displayBackdrop"
@@ -156,10 +161,7 @@
 
                 <section class="request-details-modal__section">
                   <h2 class="request-details-modal__section-title">Overview</h2>
-                  <p v-if="detailsLoading" class="request-details-modal__overview request-details-modal__overview--muted">
-                    Loading details...
-                  </p>
-                  <p v-else class="request-details-modal__overview">{{ displayOverview }}</p>
+                  <p class="request-details-modal__overview">{{ displayOverview }}</p>
                   <p v-if="detailsError" class="request-details-modal__details-error">{{ detailsError }}</p>
                 </section>
 
@@ -469,6 +471,7 @@ export default {
     return {
       details: null,
       detailsLoading: false,
+      detailsReady: false,
       detailsError: '',
       detailsRequestToken: 0,
     };
@@ -512,6 +515,12 @@ export default {
     },
     shouldFetchDetails() {
       return Boolean(this.detailsTmdbId && this.selectedSource?.media_type);
+    },
+    isModalReady() {
+      if (!this.shouldFetchDetails) {
+        return true;
+      }
+      return this.detailsReady;
     },
     displayTagline() {
       return this.details?.tagline || '';
@@ -718,12 +727,16 @@ export default {
     resetDetails() {
       this.details = null;
       this.detailsLoading = false;
+      this.detailsReady = false;
       this.detailsError = '';
       this.detailsRequestToken += 1;
     },
     async fetchDetailsForSelection() {
       if (!this.shouldFetchDetails) {
-        this.resetDetails();
+        this.details = null;
+        this.detailsLoading = false;
+        this.detailsError = '';
+        this.detailsReady = true;
         return;
       }
 
@@ -731,6 +744,7 @@ export default {
       this.detailsRequestToken = requestToken;
       this.details = null;
       this.detailsLoading = true;
+      this.detailsReady = false;
       this.detailsError = '';
 
       try {
@@ -755,6 +769,7 @@ export default {
       } finally {
         if (requestToken === this.detailsRequestToken) {
           this.detailsLoading = false;
+          this.detailsReady = true;
         }
       }
     },
@@ -782,6 +797,23 @@ export default {
   z-index: 1000;
   padding: 1.5rem 1rem;
   overflow-y: auto;
+}
+
+.request-details-modal__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-height: 8rem;
+  margin: auto;
+  color: #d1d5db;
+  font-size: 0.95rem;
+}
+
+.request-details-modal__loading i {
+  font-size: 1.75rem;
+  color: #a5b4fc;
 }
 
 .request-details-modal__content {
