@@ -30,6 +30,7 @@ export function useRequestSeerActions() {
   const seerStatusErrorByRequest = ref({});
 
   let modalTargetResolver = () => null;
+  let seerStatusChangeHandler = null;
   let batchPrefetchPromise = null;
   const queuedPosterItems = new Map();
   let posterFlushTimer = null;
@@ -38,6 +39,10 @@ export function useRequestSeerActions() {
 
   function setModalTargetResolver(resolver) {
     modalTargetResolver = typeof resolver === 'function' ? resolver : () => null;
+  }
+
+  function setSeerStatusChangeHandler(handler) {
+    seerStatusChangeHandler = typeof handler === 'function' ? handler : null;
   }
 
   function getModalTarget() {
@@ -141,6 +146,9 @@ export function useRequestSeerActions() {
 
     if (item?.request_id) {
       rememberSeerStatus(item, nextStatus);
+      if (nextStatus?.seer_status) {
+        seerStatusChangeHandler?.(item, nextStatus);
+      }
     }
 
     const modalTarget = getModalTarget();
@@ -422,6 +430,7 @@ export function useRequestSeerActions() {
     seerActionLoadingByRequest,
     seerStatusErrorByRequest,
     setModalTargetResolver,
+    setSeerStatusChangeHandler,
     canShowSeerActions,
     canShowRelatedSeer,
     getSeerModalTarget,

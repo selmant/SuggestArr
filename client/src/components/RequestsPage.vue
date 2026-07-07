@@ -447,6 +447,7 @@ export default {
       ...seer,
       setTraktModalTargetResolver: trakt.setModalTargetResolver,
       setSeerModalTargetResolver: seer.setModalTargetResolver,
+      setSeerStatusChangeHandler: seer.setSeerStatusChangeHandler,
     };
   },
   data() {
@@ -1181,6 +1182,25 @@ export default {
       this.$router.push({ name: "Home" });
     },
 
+    syncListedRequestSeerStatus(item, status) {
+      const requestId = String(item?.request_id || '');
+      const seerStatus = status?.seer_status;
+      if (!requestId || !seerStatus) {
+        return;
+      }
+
+      const updateRequest = (request) => {
+        if (String(request?.request_id || '') === requestId) {
+          request.seer_status = seerStatus;
+        }
+      };
+
+      this.flatRequests.forEach(updateRequest);
+      this.sources.forEach((source) => {
+        (source.requests || []).forEach(updateRequest);
+      });
+    },
+
     refreshModalIntegrationStatuses(source) {
       this.loadTraktStatusForSource(source, { force: true });
       this.loadSeerStatusForSource(source, { force: true });
@@ -1239,6 +1259,9 @@ export default {
       await this.loadTraktDefaults();
       this.setTraktModalTargetResolver(() => this.getTraktModalTarget(this.selectedSource));
       this.setSeerModalTargetResolver(() => this.getSeerModalTarget(this.selectedSource));
+      this.setSeerStatusChangeHandler((item, status) => {
+        this.syncListedRequestSeerStatus(item, status);
+      });
       if (this.viewMode === 'archived') {
         this.fetchArchivedRequests(1);
       } else if (this.viewMode === 'all-requests') {

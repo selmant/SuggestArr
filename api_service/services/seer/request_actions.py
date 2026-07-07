@@ -214,6 +214,7 @@ async def get_request_seer_status(
     async with _create_client() as client:
         index = await _get_requests_index(client)
     entries = _lookup_entries(index, media_type, str(tmdb_id))
+    _persist_seer_state(db, tmdb_id, media_type, entries)
     return _status_payload(tmdb_id, media_type, entries)
 
 
@@ -236,10 +237,11 @@ async def get_request_seer_statuses_batch(
     async with _create_client() as client:
         index = await _get_requests_index(client)
 
-    statuses = [
-        _status_payload(item["tmdb_id"], item["media_type"], _lookup_entries(index, item["media_type"], item["tmdb_id"]))
-        for item in normalized_items
-    ]
+    statuses = []
+    for item in normalized_items:
+        entries = _lookup_entries(index, item["media_type"], item["tmdb_id"])
+        _persist_seer_state(db, item["tmdb_id"], item["media_type"], entries)
+        statuses.append(_status_payload(item["tmdb_id"], item["media_type"], entries))
     return {"statuses": statuses}
 
 
@@ -261,6 +263,7 @@ async def _apply_action(
             if entry.get("id") is not None and is_pending_status(entry.get("status"))
         ]
         if not pending_ids:
+            _persist_seer_state(db, tmdb_id, media_type, entries)
             return _status_payload(tmdb_id, media_type, entries)
 
         for request_id in pending_ids:

@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -146,6 +146,7 @@ async def test_get_request_seer_status_returns_pending_payload():
     assert result["seer_status"] == "pending"
     assert result["can_action"] is True
     assert result["seer_request_ids"] == [9]
+    db.update_request_seer_state.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -160,6 +161,15 @@ async def test_get_request_seer_status_returns_not_found_when_missing():
     assert result["seer_status"] == "not_found"
     assert result["can_action"] is False
     assert result["seer_request_ids"] == []
+    db.update_request_seer_state.assert_called_once_with(
+        "999",
+        "tv",
+        seer_request_id=None,
+        seer_request_status=None,
+        seer_media_status=None,
+        seer_status="not_found",
+        seer_updated_at=ANY,
+    )
 
 
 @pytest.mark.asyncio
@@ -184,6 +194,7 @@ async def test_get_request_seer_statuses_batch_maps_many_items():
     assert len(result["statuses"]) == 2
     assert result["statuses"][0]["seer_status"] == "available"
     assert result["statuses"][1]["seer_status"] == "pending"
+    assert db.update_request_seer_state.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -262,6 +273,32 @@ async def test_decline_request_persists_seer_state_to_db():
     with patch.object(request_actions, "SeerClient", FakeSeerClient), \
             patch.object(request_actions, "load_env_vars", return_value=_configured_env()), \
             patch.object(request_actions, "_get_requests_index", side_effect=refresh_index):
+        result = await request_actions.decline_request(db, "7", "movie")
+
+    assert result["seer_status"] == "declined"
+    db.update_request_seer_state.assert_called_once_with(
+        "7",
+        "movie",
+        seer_request_id=3,
+        seer_request_status=3,
+        seer_media_status=2,
+        seer_status="declined",
+        seer_updated_at="2026-01-01 00:00:00",
+    )
+
+
+@pytest.mark.asyncio
+async def test_decline_request_persists_when_no_pending_requests_remain():
+    db = MagicMock()
+    FakeSeerClient.instances = []
+    FakeSeerClient.decline_should_fail = False
+    index = {
+        ("movie", "7"): [{"id": 3, "status": 3, "media_status": 2, "updated_at": "2026-01-01T00:00:00Z"}],
+    }
+
+    with patch.object(request_actions, "SeerClient", FakeSeerClient), \
+            patch.object(request_actions, "load_env_vars", return_value=_configured_env()), \
+            patch.object(request_actions, "_get_requests_index", AsyncMock(return_value=index)):
         result = await request_actions.decline_request(db, "7", "movie")
 
     assert result["seer_status"] == "declined"
