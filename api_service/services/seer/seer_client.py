@@ -634,6 +634,70 @@ class SeerClient(BaseHTTPClient):
             return f"https://www.youtube.com/watch?v={fallback['key']}"
         return None
 
+    @staticmethod
+    def _pick_content_rating(data, media_type, preferred_regions=("US", "TR", "GB")):
+        """Pick the best content rating/certification from Seer movie or TV payload."""
+        if media_type == "movie":
+            releases = data.get("releases") or {}
+            for region in preferred_regions:
+                for entry in releases.get("results") or []:
+                    if entry.get("iso_3166_1") != region:
+                        continue
+                    for release in entry.get("release_dates") or []:
+                        certification = release.get("certification")
+                        if certification:
+                            return certification
+            return None
+
+        ratings = data.get("contentRatings") or {}
+        for region in preferred_regions:
+            for entry in ratings.get("results") or []:
+                if entry.get("iso_3166_1") == region and entry.get("rating"):
+                    return entry["rating"]
+        for entry in ratings.get("results") or []:
+            if entry.get("rating"):
+                return entry["rating"]
+        return None
+
+    @staticmethod
+    def _format_watch_providers(watch_providers, preferred_regions=("US", "TR", "GB")):
+        """Return deduplicated streaming provider names for the first matching region."""
+        providers = watch_providers or []
+        region_entry = None
+        for region in preferred_regions:
+            region_entry = next(
+                (entry for entry in providers if entry.get("iso_3166_1") == region),
+                None,
+            )
+            if region_entry:
+                break
+        if region_entry is None and providers:
+            region_entry = providers[0]
+        if not region_entry:
+            return []
+
+        names = []
+        seen = set()
+        for key in ("flatrate", "rent", "buy"):
+            for item in region_entry.get(key) or []:
+                name = item.get("name") or item.get("providerName")
+                if name and name not in seen:
+                    seen.add(name)
+                    names.append(name)
+        return names[:8]
+
+    @staticmethod
+    def _extract_keywords(data):
+        """Extract keyword names from Seer movie or TV keyword payloads."""
+        keywords = data.get("keywords")
+        if isinstance(keywords, list):
+            items = keywords
+        elif isinstance(keywords, dict):
+            items = keywords.get("keywords") or []
+        else:
+            return []
+        return [item.get("name") for item in items if item.get("name")][:6]
+
     @classmethod
     def _format_media_details(cls, data, media_type):
         """
@@ -646,7 +710,7 @@ class SeerClient(BaseHTTPClient):
         genres = [genre.get("name") for genre in data.get("genres", []) if genre.get("name")]
         credits = data.get("credits") or {}
         cast = []
-        for member in (credits.get("cast") or [])[:12]:
+        for member in (credits.get("cast") or [])[:16]:
             name = member.get("name")
             if not name:
                 continue
@@ -664,6 +728,11 @@ class SeerClient(BaseHTTPClient):
                 if str(member.get("job", "")).lower() == "director" and member.get("name")
             ]
             runtime = data.get("runtime")
+            seasons_count = None
+            episodes_count = None
+            networks = []
+            release_date = data.get("releaseDate") or ""
+            original_title = data.get("originalTitle") or ""
         else:
             directors = [
                 creator.get("name")
@@ -672,19 +741,50 @@ class SeerClient(BaseHTTPClient):
             ]
             run_times = data.get("episodeRunTime") or []
             runtime = run_times[0] if run_times else None
+            seasons_count = data.get("numberOfSeasons") or data.get("numberOfSeason")
+            episodes_count = data.get("numberOfEpisodes")
+            networks = [
+                network.get("name")
+                for network in data.get("networks", [])
+                if network.get("name")
+            ]
+            release_date = data.get("firstAirDate") or ""
+            original_title = data.get("originalName") or ""
+
+        production_companies = [
+            company.get("name")
+            for company in data.get("productionCompanies", [])[:4]
+            if company.get("name")
+        ]
+        collection = (data.get("collection") or {}).get("name") or ""
+        keywords = cls._extract_keywords(data)
 
         return {
             "available": True,
             "tmdb_id": str(data.get("id") or ""),
             "media_type": media_type,
             "title": data.get("title") or data.get("name") or "",
+            "original_title": original_title,
+            "original_language": data.get("originalLanguage") or "",
             "tagline": data.get("tagline") or "",
             "overview": data.get("overview") or "",
+            "status": data.get("status") or "",
+            "release_date": release_date,
+            "content_rating": cls._pick_content_rating(data, media_type),
             "genres": genres,
+            "keywords": keywords,
             "runtime": runtime,
             "director": directors,
             "cast": cast,
             "trailer": cls._pick_trailer_url(data.get("relatedVideos")),
+            "backdrop_path": tmdb_image_url(data.get("backdropPath"), "w1280"),
+            "homepage": data.get("homepage") or "",
+            "collection": collection,
+            "networks": networks if media_type == "tv" else [],
+            "seasons_count": seasons_count if media_type == "tv" else None,
+            "episodes_count": episodes_count if media_type == "tv" else None,
+            "production_companies": production_companies,
+            "watch_providers": cls._format_watch_providers(data.get("watchProviders")),
         }
 
     async def get_media_details(self, tmdb_id, media_type):

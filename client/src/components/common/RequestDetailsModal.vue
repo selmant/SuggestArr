@@ -6,6 +6,10 @@
         class="request-details-modal"
         @click.self="$emit('close')">
         <div class="request-details-modal__content">
+          <div
+            v-if="displayBackdrop"
+            class="request-details-modal__backdrop"
+            :style="{ backgroundImage: `url(${displayBackdrop})` }" />
           <button @click="$emit('close')" class="request-details-modal__close">
             <i class="fas fa-times"></i>
           </button>
@@ -127,6 +131,7 @@
 
             <div class="request-details-modal__details-section">
               <h2 class="request-details-modal__title">{{ selectedSource.title }}</h2>
+              <p v-if="displayOriginalTitle" class="request-details-modal__original-title">{{ displayOriginalTitle }}</p>
               <p v-if="displayTagline" class="request-details-modal__tagline">{{ displayTagline }}</p>
 
               <div v-if="displayGenres.length" class="request-details-modal__genres">
@@ -138,14 +143,51 @@
                 </span>
               </div>
 
+              <div v-if="displayKeywords.length" class="request-details-modal__keywords">
+                <span
+                  v-for="keyword in displayKeywords"
+                  :key="keyword"
+                  class="request-details-modal__keyword-pill">
+                  {{ keyword }}
+                </span>
+              </div>
+
               <div v-if="hasContextRows" class="request-details-modal__context">
                 <div v-if="requestMethodLabel" class="request-details-modal__context-row">
                   <i :class="requestMethodIcon"></i>
                   <span>Request method <strong>{{ requestMethodLabel }}</strong></span>
                 </div>
-                <div v-if="selectedSource.release_date && selectedSource.requested_at" class="request-details-modal__context-row">
+                <div v-if="displayReleaseDate" class="request-details-modal__context-row">
                   <i class="fas fa-calendar"></i>
-                  <span>Released <strong>{{ selectedSource.release_date }}</strong></span>
+                  <span>{{ releaseDateHeading }} <strong>{{ displayReleaseDate }}</strong></span>
+                </div>
+                <div v-if="displayStatus" class="request-details-modal__context-row">
+                  <i class="fas fa-info-circle"></i>
+                  <span>Status <strong>{{ displayStatus }}</strong></span>
+                </div>
+                <div v-if="displayContentRating" class="request-details-modal__context-row">
+                  <i class="fas fa-shield-halved"></i>
+                  <span>Rating <strong>{{ displayContentRating }}</strong></span>
+                </div>
+                <div v-if="tvSeasonsLabel" class="request-details-modal__context-row">
+                  <i class="fas fa-layer-group"></i>
+                  <span>Seasons <strong>{{ tvSeasonsLabel }}</strong></span>
+                </div>
+                <div v-if="displayNetworks" class="request-details-modal__context-row">
+                  <i class="fas fa-satellite-dish"></i>
+                  <span>Network <strong>{{ displayNetworks }}</strong></span>
+                </div>
+                <div v-if="displayCollection" class="request-details-modal__context-row">
+                  <i class="fas fa-film"></i>
+                  <span>Collection <strong>{{ displayCollection }}</strong></span>
+                </div>
+                <div v-if="displayProductionCompanies" class="request-details-modal__context-row">
+                  <i class="fas fa-building"></i>
+                  <span>Studio <strong>{{ displayProductionCompanies }}</strong></span>
+                </div>
+                <div v-if="displayWatchProviders" class="request-details-modal__context-row">
+                  <i class="fas fa-play-circle"></i>
+                  <span>Streaming <strong>{{ displayWatchProviders }}</strong></span>
                 </div>
                 <div v-if="mediaTypeLabel" class="request-details-modal__context-row">
                   <i :class="selectedSource.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
@@ -239,14 +281,24 @@
                 </div>
               </div>
 
-              <div v-if="displayTrailer" class="request-details-modal__section">
+              <div v-if="displayTrailer || displayHomepage" class="request-details-modal__section request-details-modal__links">
                 <a
+                  v-if="displayTrailer"
                   :href="displayTrailer"
                   target="_blank"
                   rel="noopener noreferrer"
                   class="request-details-modal__trailer-btn">
                   <i class="fab fa-youtube"></i>
                   Watch Trailer
+                </a>
+                <a
+                  v-if="displayHomepage"
+                  :href="displayHomepage"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="request-details-modal__homepage-btn">
+                  <i class="fas fa-globe"></i>
+                  Official Site
                 </a>
               </div>
 
@@ -504,7 +556,14 @@ export default {
     hasContextRows() {
       return Boolean(
         this.requestMethodLabel ||
-        (this.selectedSource?.release_date && this.selectedSource?.requested_at) ||
+        this.displayReleaseDate ||
+        this.displayStatus ||
+        this.displayContentRating ||
+        this.tvSeasonsLabel ||
+        this.displayNetworks ||
+        this.displayCollection ||
+        this.displayProductionCompanies ||
+        this.displayWatchProviders ||
         this.mediaTypeLabel ||
         this.selectedSource?.rating ||
         this.hasExtraRatings ||
@@ -516,18 +575,31 @@ export default {
         this.directorLabel
       );
     },
+    detailsTmdbId() {
+      if (!this.selectedSource) {
+        return '';
+      }
+      return String(this.selectedSource.request_id || this.selectedSource.source_id || '');
+    },
     shouldFetchDetails() {
-      return Boolean(
-        this.selectedSource?.request_id &&
-        this.selectedSource?.media_type &&
-        !this.selectedSource?.requests?.length
-      );
+      return Boolean(this.detailsTmdbId && this.selectedSource?.media_type);
     },
     displayTagline() {
       return this.details?.tagline || '';
     },
+    displayOriginalTitle() {
+      const original = this.details?.original_title || '';
+      const title = this.selectedSource?.title || '';
+      if (!original || original === title) {
+        return '';
+      }
+      return original;
+    },
     displayGenres() {
       return Array.isArray(this.details?.genres) ? this.details.genres : [];
+    },
+    displayKeywords() {
+      return Array.isArray(this.details?.keywords) ? this.details.keywords : [];
     },
     displayCast() {
       return Array.isArray(this.details?.cast) ? this.details.cast : [];
@@ -535,11 +607,62 @@ export default {
     displayTrailer() {
       return this.details?.trailer || '';
     },
+    displayHomepage() {
+      return this.details?.homepage || '';
+    },
+    displayBackdrop() {
+      return this.details?.backdrop_path || this.selectedSource?.backdrop_path || '';
+    },
     displayOverview() {
       if (this.details?.overview) {
         return this.details.overview;
       }
       return this.selectedSource?.overview || 'No overview available.';
+    },
+    displayReleaseDate() {
+      return this.details?.release_date || this.selectedSource?.release_date || '';
+    },
+    releaseDateHeading() {
+      return this.selectedSource?.media_type === 'tv' ? 'First aired' : 'Released';
+    },
+    displayStatus() {
+      return this.details?.status || '';
+    },
+    displayContentRating() {
+      return this.details?.content_rating || '';
+    },
+    tvSeasonsLabel() {
+      if (this.selectedSource?.media_type !== 'tv') {
+        return '';
+      }
+      const seasons = this.details?.seasons_count;
+      const episodes = this.details?.episodes_count;
+      if (seasons == null && episodes == null) {
+        return '';
+      }
+      const parts = [];
+      if (seasons != null) {
+        parts.push(`${seasons} season${seasons === 1 ? '' : 's'}`);
+      }
+      if (episodes != null) {
+        parts.push(`${episodes} episode${episodes === 1 ? '' : 's'}`);
+      }
+      return parts.join(' · ');
+    },
+    displayNetworks() {
+      const networks = this.details?.networks;
+      return Array.isArray(networks) && networks.length ? networks.join(', ') : '';
+    },
+    displayCollection() {
+      return this.details?.collection || '';
+    },
+    displayProductionCompanies() {
+      const companies = this.details?.production_companies;
+      return Array.isArray(companies) && companies.length ? companies.join(', ') : '';
+    },
+    displayWatchProviders() {
+      const providers = this.details?.watch_providers;
+      return Array.isArray(providers) && providers.length ? providers.join(', ') : '';
     },
     runtimeLabel() {
       const runtime = this.details?.runtime;
@@ -643,7 +766,7 @@ export default {
 
       try {
         const response = await getRequestDetails(
-          this.selectedSource.request_id,
+          this.detailsTmdbId,
           this.selectedSource.media_type,
         );
         if (requestToken !== this.detailsRequestToken) {
@@ -702,8 +825,26 @@ export default {
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
+  overflow-x: hidden;
   box-shadow: var(--modal-shadow);
   margin: auto;
+}
+
+.request-details-modal__backdrop {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 220px;
+  background-size: cover;
+  background-position: center top;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.request-details-modal__backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent 10%, var(--surface-overlay) 100%);
 }
 
 .request-details-modal__close {
@@ -732,6 +873,8 @@ export default {
 }
 
 .request-details-modal__layout {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 2rem;
@@ -990,6 +1133,12 @@ export default {
   line-height: 1.4;
 }
 
+.request-details-modal__original-title {
+  margin: -0.35rem 0 var(--spacing-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
 .request-details-modal__genres {
   display: flex;
   flex-wrap: wrap;
@@ -1007,6 +1156,24 @@ export default {
   color: var(--color-primary-light);
   font-size: var(--font-size-xs);
   font-weight: 600;
+}
+
+.request-details-modal__keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-md);
+}
+
+.request-details-modal__keyword-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
 }
 
 .request-details-modal__details-error {
@@ -1086,6 +1253,31 @@ export default {
 
 .request-details-modal__trailer-btn:hover {
   filter: brightness(1.08);
+}
+
+.request-details-modal__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.request-details-modal__homepage-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-interactive);
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  font-weight: 600;
+  transition: var(--transition-base);
+}
+
+.request-details-modal__homepage-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary-light);
 }
 
 .request-details-modal__requests-list {

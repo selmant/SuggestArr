@@ -755,6 +755,30 @@ class TestFormatMediaDetails(unittest.TestCase):
                 {"site": "YouTube", "type": "Teaser", "key": "teaser"},
                 {"site": "YouTube", "type": "Trailer", "key": "trailer123"},
             ],
+            "status": "Released",
+            "releaseDate": "1999-10-15",
+            "originalTitle": "Fight Club",
+            "originalLanguage": "en",
+            "backdropPath": "/backdrop.jpg",
+            "homepage": "https://www.foxmovies.com/movies/fight-club",
+            "collection": {"name": "Fight Club Collection"},
+            "productionCompanies": [{"name": "Fox 2000 Pictures"}],
+            "keywords": {"keywords": [{"name": "dual identity"}]},
+            "releases": {
+                "results": [
+                    {
+                        "iso_3166_1": "US",
+                        "release_dates": [{"certification": "R"}],
+                    },
+                ],
+            },
+            "watchProviders": [
+                {
+                    "iso_3166_1": "US",
+                    "flatrate": [{"name": "Hulu"}],
+                    "buy": [{"name": "Apple TV"}],
+                },
+            ],
         }
 
         result = SeerClient._format_media_details(payload, "movie")
@@ -768,6 +792,13 @@ class TestFormatMediaDetails(unittest.TestCase):
         self.assertEqual(len(result["cast"]), 1)
         self.assertIn("brad.jpg", result["cast"][0]["profile_path"])
         self.assertEqual(result["trailer"], "https://www.youtube.com/watch?v=trailer123")
+        self.assertEqual(result["status"], "Released")
+        self.assertEqual(result["release_date"], "1999-10-15")
+        self.assertEqual(result["content_rating"], "R")
+        self.assertEqual(result["watch_providers"], ["Hulu", "Apple TV"])
+        self.assertEqual(result["collection"], "Fight Club Collection")
+        self.assertEqual(result["keywords"], ["dual identity"])
+        self.assertIn("backdrop.jpg", result["backdrop_path"])
 
     def test_formats_tv_details_with_created_by_and_episode_runtime(self):
         payload = {
@@ -779,6 +810,15 @@ class TestFormatMediaDetails(unittest.TestCase):
             "createdBy": [{"name": "David Benioff"}, {"name": "D.B. Weiss"}],
             "credits": {"cast": [{"name": "Peter Dinklage", "character": "Tyrion Lannister"}]},
             "relatedVideos": [],
+            "status": "Ended",
+            "firstAirDate": "2011-04-17",
+            "numberOfSeasons": 8,
+            "numberOfEpisodes": 73,
+            "networks": [{"name": "HBO"}],
+            "contentRatings": {
+                "results": [{"iso_3166_1": "US", "rating": "TV-MA"}],
+            },
+            "keywords": [{"name": "dragon"}],
         }
 
         result = SeerClient._format_media_details(payload, "tv")
@@ -788,6 +828,12 @@ class TestFormatMediaDetails(unittest.TestCase):
         self.assertEqual(result["director"], ["David Benioff", "D.B. Weiss"])
         self.assertEqual(result["genres"], ["Drama", "Fantasy"])
         self.assertIsNone(result["trailer"])
+        self.assertEqual(result["status"], "Ended")
+        self.assertEqual(result["seasons_count"], 8)
+        self.assertEqual(result["episodes_count"], 73)
+        self.assertEqual(result["networks"], ["HBO"])
+        self.assertEqual(result["content_rating"], "TV-MA")
+        self.assertEqual(result["keywords"], ["dragon"])
 
     def test_pick_trailer_falls_back_to_any_youtube_video(self):
         videos = [
