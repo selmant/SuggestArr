@@ -1,5 +1,5 @@
 <template>
-  <div class="request-card" :class="{ 'request-card--compact': compact }" data-testid="request-poster-card" @click="$emit('select', item)">
+  <div class="request-card" :class="{ 'request-card--compact': compact }" data-testid="request-poster-card" @click="$emit('select', item)" @mouseenter="onMouseEnter">
     <div class="request-card-poster" :class="posterDockClasses">
       <img
         v-if="item.poster_path"
@@ -16,6 +16,7 @@
           <i :class="item.media_type === 'movie' ? 'fas fa-film' : 'fas fa-tv'"></i>
           {{ mediaTypeLabel }}
         </span>
+        <span v-if="item.is_anime" class="poster-pill poster-pill--anime">Anime</span>
         <RatingBadges
           class="poster-rating-badges"
           :item="item"
@@ -108,6 +109,7 @@
 
     <div class="request-card-body">
       <h3 class="request-card-title">{{ item.title }}</h3>
+      <p v-if="releaseYear" class="request-card-year">{{ releaseYear }}</p>
 
       <div v-if="sourceMode === 'ai' && item.rationale" class="source-link">
         <i class="fas fa-search"></i>
@@ -127,6 +129,7 @@
 
 <script>
 import { formatDate } from '@/utils/dateUtils.js';
+import { prefetchRequestDetails } from '@/utils/requestDetailsCache.js';
 import {
   getRequestMethodMetadata,
   getRequestSourceContentMetadata,
@@ -271,9 +274,16 @@ export default {
 
       return String(this.item.media_type || '').toUpperCase();
     },
+    releaseYear() {
+      const date = this.item.release_date;
+      return date ? String(date).slice(0, 4) : '';
+    },
   },
   methods: {
     formatDate,
+    onMouseEnter() {
+      prefetchRequestDetails(this.item.request_id, this.item.media_type);
+    },
   },
 };
 </script>
@@ -405,6 +415,12 @@ export default {
   color: var(--color-primary-light);
 }
 
+.poster-pill--anime {
+  background-color: rgba(236, 72, 153, 0.2);
+  border-color: rgba(236, 72, 153, 0.35);
+  color: #fbcfe8;
+}
+
 .poster-rating-badges {
   flex: 0 1 auto;
   max-width: 52%;
@@ -480,6 +496,13 @@ export default {
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.request-card-year {
+  margin: -0.35rem 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .source-link {

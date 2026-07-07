@@ -608,8 +608,8 @@ class SeerClient(BaseHTTPClient):
         return await self._make_request("GET", endpoint, use_cookie=bool(self.session_token))
 
     @staticmethod
-    def _pick_trailer_url(related_videos):
-        """Return the best YouTube trailer URL from Seer relatedVideos."""
+    def _pick_trailer(related_videos):
+        """Return the best YouTube trailer key and URL from Seer relatedVideos."""
         videos = related_videos or []
         trailer = next(
             (
@@ -621,7 +621,8 @@ class SeerClient(BaseHTTPClient):
             None,
         )
         if trailer:
-            return f"https://www.youtube.com/watch?v={trailer['key']}"
+            key = trailer["key"]
+            return key, f"https://www.youtube.com/watch?v={key}"
 
         fallback = next(
             (
@@ -631,8 +632,53 @@ class SeerClient(BaseHTTPClient):
             None,
         )
         if fallback:
-            return f"https://www.youtube.com/watch?v={fallback['key']}"
-        return None
+            key = fallback["key"]
+            return key, f"https://www.youtube.com/watch?v={key}"
+        return None, None
+
+    @classmethod
+    def _pick_trailer_url(cls, related_videos):
+        """Return the best YouTube trailer URL from Seer relatedVideos."""
+        _, url = cls._pick_trailer(related_videos)
+        return url
+
+    _CREW_JOBS = frozenset({
+        "writer",
+        "screenplay",
+        "story",
+        "novel",
+        "producer",
+        "executive producer",
+    })
+
+    @classmethod
+    def _format_crew(cls, credits):
+        """Return top crew members for key writing/production roles."""
+        crew = []
+        seen = set()
+        for member in credits.get("crew") or []:
+            name = member.get("name")
+            job = member.get("job") or ""
+            if not name:
+                continue
+            if str(job).lower() == "director":
+                continue
+            if str(job).lower() not in cls._CREW_JOBS:
+                continue
+            key = (name, job)
+            if key in seen:
+                continue
+            seen.add(key)
+            crew.append({"name": name, "job": job})
+            if len(crew) >= 6:
+                break
+        return crew
+
+    @staticmethod
+    def _resolve_imdb_id(data):
+        """Resolve an IMDb id from Seer detail payload fields."""
+        external_ids = data.get("externalIds") or {}
+        return data.get("imdbId") or external_ids.get("imdbId") or external_ids.get("imdb_id") or ""
 
     @staticmethod
     def _pick_content_rating(data, media_type, preferred_regions=("US", "TR", "GB")):
@@ -661,7 +707,7 @@ class SeerClient(BaseHTTPClient):
 
     @staticmethod
     def _format_watch_providers(watch_providers, preferred_regions=("US", "TR", "GB")):
-        """Return deduplicated streaming provider names for the first matching region."""
+        """Return deduplicated streaming providers for the first matching region."""
         providers = watch_providers or []
         region_entry = None
         for region in preferred_regions:
@@ -676,15 +722,22 @@ class SeerClient(BaseHTTPClient):
         if not region_entry:
             return []
 
-        names = []
+        formatted = []
         seen = set()
         for key in ("flatrate", "rent", "buy"):
             for item in region_entry.get(key) or []:
                 name = item.get("name") or item.get("providerName")
-                if name and name not in seen:
-                    seen.add(name)
-                    names.append(name)
-        return names[:8]
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                formatted.append({
+                    "name": name,
+                    "logo_path": tmdb_image_url(
+                        item.get("logoPath") or item.get("logo_path"),
+                        "w45",
+                    ),
+                })
+        return formatted[:8]
 
     @staticmethod
     def _extract_keywords(data):
@@ -733,6 +786,9 @@ class SeerClient(BaseHTTPClient):
             networks = []
             release_date = data.get("releaseDate") or ""
             original_title = data.get("originalTitle") or ""
+            last_air_date = ""
+            next_air_date = ""
+            in_production = False
         else:
             directors = [
                 creator.get("name")
@@ -750,7 +806,12 @@ class SeerClient(BaseHTTPClient):
             ]
             release_date = data.get("firstAirDate") or ""
             original_title = data.get("originalName") or ""
+            last_air_date = data.get("lastAirDate") or ""
+            next_episode = data.get("nextEpisodeToAir") or {}
+            next_air_date = next_episode.get("airDate") or ""
+            in_production = bool(data.get("inProduction"))
 
+        trailer_key, trailer_url = cls._pick_trailer(data.get("relatedVideos"))
         production_companies = [
             company.get("name")
             for company in data.get("productionCompanies", [])[:4]
@@ -775,14 +836,20 @@ class SeerClient(BaseHTTPClient):
             "keywords": keywords,
             "runtime": runtime,
             "director": directors,
+            "crew": cls._format_crew(credits),
             "cast": cast,
-            "trailer": cls._pick_trailer_url(data.get("relatedVideos")),
+            "imdb_id": cls._resolve_imdb_id(data),
+            "trailer": trailer_url,
+            "trailer_key": trailer_key,
             "backdrop_path": tmdb_image_url(data.get("backdropPath"), "w1280"),
             "homepage": data.get("homepage") or "",
             "collection": collection,
             "networks": networks if media_type == "tv" else [],
             "seasons_count": seasons_count if media_type == "tv" else None,
             "episodes_count": episodes_count if media_type == "tv" else None,
+            "last_air_date": last_air_date if media_type == "tv" else "",
+            "next_air_date": next_air_date if media_type == "tv" else "",
+            "in_production": in_production if media_type == "tv" else False,
             "production_companies": production_companies,
             "watch_providers": cls._format_watch_providers(data.get("watchProviders")),
         }
@@ -798,7 +865,11 @@ class SeerClient(BaseHTTPClient):
         data = await self._fetch_media_detail_payload(tmdb_id, media_type)
         if not data:
             return None
-        return self._format_media_details(data, media_type)
+        details = self._format_media_details(data, media_type)
+        details["seer_url"] = (
+            f"{self.api_url.rstrip('/')}/{'movie' if media_type == 'movie' else 'tv'}/{int(tmdb_id)}"
+        )
+        return details
 
     async def delete_media_file_by_tmdb(self, tmdb_id, media_type):
         """Delete files (via arr) for the Seer media matching tmdb_id. Returns True on success."""

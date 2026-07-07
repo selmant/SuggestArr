@@ -37,8 +37,11 @@
               </div>
 
               <div class="request-details-modal__title-block">
-                <div v-if="selectedSource.media_type" class="request-details-modal__type-badge">
-                  {{ selectedSource.media_type === 'movie' ? 'Movie' : 'TV Series' }}
+                <div v-if="selectedSource.media_type" class="request-details-modal__badges">
+                  <span class="request-details-modal__type-badge">
+                    {{ selectedSource.media_type === 'movie' ? 'Movie' : 'TV Series' }}
+                  </span>
+                  <span v-if="selectedSource.is_anime" class="request-details-modal__anime-badge">Anime</span>
                 </div>
 
                 <h1 class="request-details-modal__title">
@@ -201,7 +204,35 @@
                   </div>
                 </section>
 
-                <section v-if="displayTrailer || displayHomepage" class="request-details-modal__section request-details-modal__links">
+                <section v-if="displayCrew.length" class="request-details-modal__section">
+                  <h2 class="request-details-modal__section-title">Crew</h2>
+                  <div class="request-details-modal__cast-list">
+                    <div
+                      v-for="member in displayCrew"
+                      :key="`${member.name}-${member.job}`"
+                      class="request-details-modal__cast-card">
+                      <div class="request-details-modal__cast-avatar request-details-modal__cast-avatar--crew">
+                        <div class="request-details-modal__cast-photo-placeholder">
+                          <i class="fas fa-user"></i>
+                        </div>
+                      </div>
+                      <div class="request-details-modal__cast-meta">
+                        <span class="request-details-modal__cast-name">{{ member.name }}</span>
+                        <span v-if="member.job" class="request-details-modal__cast-character">{{ member.job }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section v-if="displayTrailer || displayHomepage || displayTmdbUrl || displayImdbUrl || displaySeerUrl" class="request-details-modal__section request-details-modal__links">
+                  <button
+                    v-if="displayTrailerKey"
+                    type="button"
+                    class="request-details-modal__link-btn request-details-modal__link-btn--trailer"
+                    @click="showEmbeddedTrailer = !showEmbeddedTrailer">
+                    <i class="fab fa-youtube"></i>
+                    {{ showEmbeddedTrailer ? 'Hide Trailer' : 'Play Trailer' }}
+                  </button>
                   <a
                     v-if="displayTrailer"
                     :href="displayTrailer"
@@ -220,6 +251,44 @@
                     <i class="fas fa-globe"></i>
                     Official Site
                   </a>
+                  <a
+                    v-if="displayTmdbUrl"
+                    :href="displayTmdbUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="request-details-modal__link-btn">
+                    <i class="fas fa-film"></i>
+                    TMDB
+                  </a>
+                  <a
+                    v-if="displayImdbUrl"
+                    :href="displayImdbUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="request-details-modal__link-btn">
+                    <i class="fab fa-imdb"></i>
+                    IMDb
+                  </a>
+                  <a
+                    v-if="displaySeerUrl"
+                    :href="displaySeerUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="request-details-modal__link-btn">
+                    <i class="fas fa-inbox"></i>
+                    Open in Seer
+                  </a>
+                </section>
+
+                <section v-if="showEmbeddedTrailer && displayTrailerKey" class="request-details-modal__section">
+                  <div class="request-details-modal__trailer-embed">
+                    <iframe
+                      :src="`https://www.youtube.com/embed/${displayTrailerKey}`"
+                      title="Trailer"
+                      frameborder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowfullscreen />
+                  </div>
                 </section>
               </div>
 
@@ -242,9 +311,14 @@
                   <div class="request-details-modal__provider-list">
                     <span
                       v-for="provider in displayWatchProviders"
-                      :key="provider"
-                      class="request-details-modal__provider-pill">
-                      {{ provider }}
+                      :key="provider.name"
+                      class="request-details-modal__provider-chip">
+                      <img
+                        v-if="provider.logo_path"
+                        :src="provider.logo_path"
+                        :alt="provider.name"
+                        class="request-details-modal__provider-logo" />
+                      <span>{{ provider.name }}</span>
                     </span>
                   </div>
                 </section>
@@ -354,7 +428,7 @@
 
 <script>
 import { formatDate } from '@/utils/dateUtils.js';
-import { getRequestDetails } from '@/api/api.js';
+import { getRequestDetailsCached, getCachedRequestDetails } from '@/utils/requestDetailsCache.js';
 import {
   getRequestMethodMetadata,
   getRequestSourceContentMetadata,
@@ -474,6 +548,7 @@ export default {
       detailsReady: false,
       detailsError: '',
       detailsRequestToken: 0,
+      showEmbeddedTrailer: false,
     };
   },
   emits: [
@@ -542,11 +617,45 @@ export default {
     displayCast() {
       return Array.isArray(this.details?.cast) ? this.details.cast : [];
     },
+    displayCrew() {
+      return Array.isArray(this.details?.crew) ? this.details.crew : [];
+    },
     displayTrailer() {
       return this.details?.trailer || '';
     },
+    displayTrailerKey() {
+      return this.details?.trailer_key || '';
+    },
     displayHomepage() {
       return this.details?.homepage || '';
+    },
+    displayTmdbUrl() {
+      if (!this.detailsTmdbId || !this.selectedSource?.media_type) {
+        return '';
+      }
+      return `https://www.themoviedb.org/${this.selectedSource.media_type}/${this.detailsTmdbId}`;
+    },
+    displayImdbUrl() {
+      const imdbId = this.details?.imdb_id;
+      if (!imdbId) {
+        return '';
+      }
+      return `https://www.imdb.com/title/${imdbId}`;
+    },
+    displaySeerUrl() {
+      return this.details?.seer_url || '';
+    },
+    displayOriginalLanguage() {
+      return this.details?.original_language || '';
+    },
+    displayLastAirDate() {
+      return this.details?.last_air_date || '';
+    },
+    displayNextAirDate() {
+      return this.details?.next_air_date || '';
+    },
+    displayInProduction() {
+      return this.selectedSource?.media_type === 'tv' ? this.details?.in_production : null;
     },
     displayBackdrop() {
       return this.details?.backdrop_path || this.selectedSource?.backdrop_path || '';
@@ -601,7 +710,10 @@ export default {
     },
     displayWatchProviders() {
       const providers = this.details?.watch_providers;
-      return Array.isArray(providers) ? providers : [];
+      if (!Array.isArray(providers)) {
+        return [];
+      }
+      return providers.filter(provider => provider && provider.name);
     },
     runtimeLabel() {
       const runtime = this.details?.runtime;
@@ -661,6 +773,18 @@ export default {
       }
       if (this.displayProductionCompanies) {
         items.push({ label: 'Studio', value: this.displayProductionCompanies });
+      }
+      if (this.displayOriginalLanguage) {
+        items.push({ label: 'Original Language', value: this.displayOriginalLanguage.toUpperCase() });
+      }
+      if (this.displayLastAirDate) {
+        items.push({ label: 'Last Aired', value: this.displayLastAirDate });
+      }
+      if (this.displayNextAirDate) {
+        items.push({ label: 'Next Episode', value: this.displayNextAirDate });
+      }
+      if (this.displayInProduction != null) {
+        items.push({ label: 'In Production', value: this.displayInProduction ? 'Yes' : 'No' });
       }
       return items;
     },
@@ -729,6 +853,7 @@ export default {
       this.detailsLoading = false;
       this.detailsReady = false;
       this.detailsError = '';
+      this.showEmbeddedTrailer = false;
       this.detailsRequestToken += 1;
     },
     async fetchDetailsForSelection() {
@@ -742,20 +867,37 @@ export default {
 
       const requestToken = this.detailsRequestToken + 1;
       this.detailsRequestToken = requestToken;
+      this.detailsError = '';
+      this.showEmbeddedTrailer = false;
+
+      const cached = getCachedRequestDetails(
+        this.detailsTmdbId,
+        this.selectedSource.media_type,
+      );
+      if (cached) {
+        if (cached.available === false) {
+          this.details = null;
+          this.detailsError = 'Extra details are unavailable from Seer right now.';
+        } else {
+          this.details = cached;
+        }
+        this.detailsLoading = false;
+        this.detailsReady = true;
+        return;
+      }
+
       this.details = null;
       this.detailsLoading = true;
       this.detailsReady = false;
-      this.detailsError = '';
 
       try {
-        const response = await getRequestDetails(
+        const payload = await getRequestDetailsCached(
           this.detailsTmdbId,
           this.selectedSource.media_type,
         );
         if (requestToken !== this.detailsRequestToken) {
           return;
         }
-        const payload = response?.data || {};
         if (payload.available === false) {
           this.detailsError = 'Extra details are unavailable from Seer right now.';
           return;
@@ -913,13 +1055,31 @@ export default {
   padding-bottom: 0.25rem;
 }
 
+.request-details-modal__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.45rem;
+}
+
 .request-details-modal__type-badge {
   display: inline-flex;
-  margin-bottom: 0.45rem;
   padding: 0.15rem 0.55rem;
   border-radius: 0.35rem;
   background: rgba(99, 102, 241, 0.18);
   color: #c7d2fe;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.request-details-modal__anime-badge {
+  display: inline-flex;
+  padding: 0.15rem 0.55rem;
+  border-radius: 0.35rem;
+  background: rgba(236, 72, 153, 0.18);
+  color: #fbcfe8;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1105,6 +1265,27 @@ export default {
   line-height: 1.25;
 }
 
+.request-details-modal__cast-avatar--crew {
+  border-color: #4b5563;
+}
+
+.request-details-modal__trailer-embed {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%;
+  border-radius: 0.65rem;
+  overflow: hidden;
+  background: #000;
+}
+
+.request-details-modal__trailer-embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
 .request-details-modal__links {
   display: flex;
   flex-wrap: wrap;
@@ -1198,14 +1379,23 @@ export default {
   gap: 0.45rem;
 }
 
-.request-details-modal__provider-pill {
+.request-details-modal__provider-chip {
   display: inline-flex;
-  padding: 0.25rem 0.55rem;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem 0.25rem 0.25rem;
   border-radius: 0.35rem;
   background: #111827;
   border: 1px solid #4b5563;
   color: #e5e7eb;
   font-size: 0.78rem;
+}
+
+.request-details-modal__provider-logo {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 0.25rem;
+  object-fit: cover;
 }
 
 .request-details-modal__related {

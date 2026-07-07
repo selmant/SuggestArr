@@ -749,6 +749,8 @@ class TestFormatMediaDetails(unittest.TestCase):
                 ],
                 "crew": [
                     {"name": "David Fincher", "job": "Director"},
+                    {"name": "Chuck Palahniuk", "job": "Novel"},
+                    {"name": "Jim Uhls", "job": "Screenplay"},
                 ],
             },
             "relatedVideos": [
@@ -775,10 +777,11 @@ class TestFormatMediaDetails(unittest.TestCase):
             "watchProviders": [
                 {
                     "iso_3166_1": "US",
-                    "flatrate": [{"name": "Hulu"}],
-                    "buy": [{"name": "Apple TV"}],
+                    "flatrate": [{"name": "Hulu", "logoPath": "/hulu.png"}],
+                    "buy": [{"name": "Apple TV", "logoPath": "/apple.png"}],
                 },
             ],
+            "imdbId": "tt0137523",
         }
 
         result = SeerClient._format_media_details(payload, "movie")
@@ -792,10 +795,19 @@ class TestFormatMediaDetails(unittest.TestCase):
         self.assertEqual(len(result["cast"]), 1)
         self.assertIn("brad.jpg", result["cast"][0]["profile_path"])
         self.assertEqual(result["trailer"], "https://www.youtube.com/watch?v=trailer123")
+        self.assertEqual(result["trailer_key"], "trailer123")
+        self.assertEqual(result["imdb_id"], "tt0137523")
+        self.assertEqual(result["crew"], [
+            {"name": "Chuck Palahniuk", "job": "Novel"},
+            {"name": "Jim Uhls", "job": "Screenplay"},
+        ])
         self.assertEqual(result["status"], "Released")
         self.assertEqual(result["release_date"], "1999-10-15")
         self.assertEqual(result["content_rating"], "R")
-        self.assertEqual(result["watch_providers"], ["Hulu", "Apple TV"])
+        self.assertEqual(result["watch_providers"], [
+            {"name": "Hulu", "logo_path": "https://image.tmdb.org/t/p/w45/hulu.png"},
+            {"name": "Apple TV", "logo_path": "https://image.tmdb.org/t/p/w45/apple.png"},
+        ])
         self.assertEqual(result["collection"], "Fight Club Collection")
         self.assertEqual(result["keywords"], ["dual identity"])
         self.assertIn("backdrop.jpg", result["backdrop_path"])
@@ -819,6 +831,9 @@ class TestFormatMediaDetails(unittest.TestCase):
                 "results": [{"iso_3166_1": "US", "rating": "TV-MA"}],
             },
             "keywords": [{"name": "dragon"}],
+            "lastAirDate": "2019-05-19",
+            "nextEpisodeToAir": {"airDate": "2019-05-19"},
+            "inProduction": False,
         }
 
         result = SeerClient._format_media_details(payload, "tv")
@@ -828,12 +843,16 @@ class TestFormatMediaDetails(unittest.TestCase):
         self.assertEqual(result["director"], ["David Benioff", "D.B. Weiss"])
         self.assertEqual(result["genres"], ["Drama", "Fantasy"])
         self.assertIsNone(result["trailer"])
+        self.assertIsNone(result["trailer_key"])
         self.assertEqual(result["status"], "Ended")
         self.assertEqual(result["seasons_count"], 8)
         self.assertEqual(result["episodes_count"], 73)
         self.assertEqual(result["networks"], ["HBO"])
         self.assertEqual(result["content_rating"], "TV-MA")
         self.assertEqual(result["keywords"], ["dragon"])
+        self.assertEqual(result["last_air_date"], "2019-05-19")
+        self.assertEqual(result["next_air_date"], "2019-05-19")
+        self.assertFalse(result["in_production"])
 
     def test_pick_trailer_falls_back_to_any_youtube_video(self):
         videos = [
@@ -869,6 +888,7 @@ class TestGetMediaDetails(unittest.IsolatedAsyncioTestCase):
             result = await client.get_media_details("101", "movie")
         self.assertEqual(result["title"], "Example")
         self.assertTrue(result["available"])
+        self.assertEqual(result["seer_url"], "http://seer.local/movie/101")
 
 
 if __name__ == '__main__':

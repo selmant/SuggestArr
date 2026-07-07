@@ -9,7 +9,9 @@ from api_service.services.seer.seer_client import PENDING_REQUEST_STATUSES, Seer
 
 _VALID_MEDIA_TYPES = {"movie", "tv"}
 _INDEX_CACHE_TTL_SECONDS = 5.0
+_DETAILS_CACHE_TTL_SECONDS = 600.0
 _index_cache: dict[str, Any] = {"fetched_at": 0.0, "index": {}}
+_details_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
 
 def _normalize_media_type(media_type: str) -> str:
@@ -40,6 +42,29 @@ def invalidate_requests_index_cache() -> None:
     """Clear the in-process Seer requests index cache."""
     _index_cache["fetched_at"] = 0.0
     _index_cache["index"] = {}
+
+
+def invalidate_request_details_cache() -> None:
+    """Clear the in-process Seer request details cache."""
+    _details_cache.clear()
+
+
+def _get_cached_request_details(media_type: str, tmdb_id: str) -> Optional[dict[str, Any]]:
+    cache_key = (media_type, str(tmdb_id))
+    entry = _details_cache.get(cache_key)
+    if not entry:
+        return None
+    if (time.monotonic() - float(entry["fetched_at"])) >= _DETAILS_CACHE_TTL_SECONDS:
+        _details_cache.pop(cache_key, None)
+        return None
+    return entry["details"]
+
+
+def _set_cached_request_details(media_type: str, tmdb_id: str, details: dict[str, Any]) -> None:
+    _details_cache[(media_type, str(tmdb_id))] = {
+        "fetched_at": time.monotonic(),
+        "details": details,
+    }
 
 
 async def _get_requests_index(client: SeerClient, *, force: bool = False) -> dict:
@@ -127,14 +152,20 @@ async def get_request_details(
 ) -> dict[str, Any]:
     """Return rich Seer-backed metadata for a SuggestArr request item."""
     media_type = _normalize_media_type(media_type)
+    tmdb_id = str(tmdb_id)
+    cached = _get_cached_request_details(media_type, tmdb_id)
+    if cached is not None:
+        return cached
+
     async with _create_client() as client:
         details = await client.get_media_details(tmdb_id, media_type)
     if not details:
         return {
             "available": False,
-            "tmdb_id": str(tmdb_id),
+            "tmdb_id": tmdb_id,
             "media_type": media_type,
         }
+    _set_cached_request_details(media_type, tmdb_id, details)
     return details
 
 

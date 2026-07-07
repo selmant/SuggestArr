@@ -78,6 +78,7 @@ async def test_get_request_details_returns_formatted_payload():
         "genres": ["Drama"],
         "cast": [],
     }
+    request_actions.invalidate_request_details_cache()
 
     with patch.object(request_actions, "SeerClient", FakeSeerClient), \
             patch.object(request_actions, "load_env_vars", return_value=_configured_env()):
@@ -86,6 +87,46 @@ async def test_get_request_details_returns_formatted_payload():
     assert result["available"] is True
     assert result["title"] == "Example"
     assert result["genres"] == ["Drama"]
+    assert len(FakeSeerClient.instances) == 1
+    assert FakeSeerClient.instances[0].get_media_details.await_count == 1
+
+    with patch.object(request_actions, "SeerClient", FakeSeerClient), \
+            patch.object(request_actions, "load_env_vars", return_value=_configured_env()):
+        cached = await request_actions.get_request_details(db, "123", "movie")
+
+    assert cached == result
+    assert FakeSeerClient.instances[0].get_media_details.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_request_details_cache_expires(monkeypatch):
+    db = MagicMock()
+    FakeSeerClient.instances = []
+    FakeSeerClient.media_details_response = {
+        "available": True,
+        "tmdb_id": "123",
+        "media_type": "movie",
+        "title": "Example",
+    }
+    request_actions.invalidate_request_details_cache()
+    now = {"value": 1000.0}
+    monkeypatch.setattr(request_actions.time, "monotonic", lambda: now["value"])
+
+    with patch.object(request_actions, "SeerClient", FakeSeerClient), \
+            patch.object(request_actions, "load_env_vars", return_value=_configured_env()):
+        first = await request_actions.get_request_details(db, "123", "movie")
+        now["value"] += request_actions._DETAILS_CACHE_TTL_SECONDS - 1
+        cached = await request_actions.get_request_details(db, "123", "movie")
+        now["value"] += 2
+        refreshed = await request_actions.get_request_details(db, "123", "movie")
+
+    assert first == cached
+    assert refreshed == first
+    total_fetches = sum(
+        client.get_media_details.await_count
+        for client in FakeSeerClient.instances
+    )
+    assert total_fetches == 2
 
 
 @pytest.mark.asyncio

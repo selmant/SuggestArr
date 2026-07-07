@@ -1656,6 +1656,7 @@ class DatabaseManager:
                 "rating": round(row[23], 2) if row[23] is not None else None,
                 **{k: v for k, v in request_ratings.items() if k != 'ratings_updated_at'},
                 "logo_path": row[32],
+                "is_anime": bool(row[34]) if len(row) > 34 and row[34] is not None else False,
                 "rationale": row[35] if len(row) > 35 else None,
                 "user_id": row[36] if len(row) > 36 else None,
                 "user_name": row[37] if len(row) > 37 else None,
@@ -2033,7 +2034,8 @@ class DatabaseManager:
                 m.title, m.overview, m.poster_path, m.release_date, m.rating,
                 m.backdrop_path, m.logo_path,
                 m.imdb_id, m.imdb_rating, m.imdb_votes, m.rt_rating, m.rt_user_rating, m.metacritic_rating,
-                m.trakt_rating, m.trakt_votes
+                m.trakt_rating, m.trakt_votes,
+                r.is_anime
             FROM requests r
             JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
             WHERE r.requested_by = 'SuggestArr'
@@ -2080,6 +2082,7 @@ class DatabaseManager:
                     ).items()
                     if k != 'ratings_updated_at'
                 },
+                "is_anime": bool(row[19]) if len(row) > 19 and row[19] is not None else False,
             })
 
         total_pages = max(1, (total + per_page - 1) // per_page)
