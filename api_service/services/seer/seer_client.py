@@ -5,6 +5,7 @@ from api_service.services.http.base_client import BaseHTTPClient
 from api_service.config.logger_manager import LoggerManager
 from api_service.db.database_manager import DatabaseManager
 from api_service.services.request_sources import is_tmdb_metadata_source_id
+from api_service.utils.tmdb_images import tmdb_image_url
 
 BATCH_SIZE = 20  # Number of requests fetched per batch
 HTTP_OK = {200, 201, 202}  # Include 202 Accepted for async operations
@@ -595,12 +596,109 @@ class SeerClient(BaseHTTPClient):
 
     async def lookup_seer_media_id(self, tmdb_id, media_type):
         """Resolve TMDB id to Seer's internal mediaInfo.id (None if not present in Seer)."""
-        endpoint = f"api/v1/{'movie' if media_type == 'movie' else 'tv'}/{int(tmdb_id)}"
-        data = await self._make_request("GET", endpoint, use_cookie=bool(self.session_token))
+        data = await self._fetch_media_detail_payload(tmdb_id, media_type)
         if not data:
             return None
         media_info = data.get("mediaInfo") or {}
         return media_info.get("id")
+
+    async def _fetch_media_detail_payload(self, tmdb_id, media_type):
+        """Fetch raw Seer/Jellyseerr media detail payload for a TMDB id."""
+        endpoint = f"api/v1/{'movie' if media_type == 'movie' else 'tv'}/{int(tmdb_id)}"
+        return await self._make_request("GET", endpoint, use_cookie=bool(self.session_token))
+
+    @staticmethod
+    def _pick_trailer_url(related_videos):
+        """Return the best YouTube trailer URL from Seer relatedVideos."""
+        videos = related_videos or []
+        trailer = next(
+            (
+                video for video in videos
+                if str(video.get("site", "")).lower() == "youtube"
+                and str(video.get("type", "")).lower() == "trailer"
+                and video.get("key")
+            ),
+            None,
+        )
+        if trailer:
+            return f"https://www.youtube.com/watch?v={trailer['key']}"
+
+        fallback = next(
+            (
+                video for video in videos
+                if str(video.get("site", "")).lower() == "youtube" and video.get("key")
+            ),
+            None,
+        )
+        if fallback:
+            return f"https://www.youtube.com/watch?v={fallback['key']}"
+        return None
+
+    @classmethod
+    def _format_media_details(cls, data, media_type):
+        """
+        Map Seer media detail payload into a normalized metadata dict.
+
+        :param data: Raw Seer API response for movie/tv detail.
+        :param media_type: ``movie`` or ``tv``.
+        :return: Normalized metadata fields for the request details UI.
+        """
+        genres = [genre.get("name") for genre in data.get("genres", []) if genre.get("name")]
+        credits = data.get("credits") or {}
+        cast = []
+        for member in (credits.get("cast") or [])[:12]:
+            name = member.get("name")
+            if not name:
+                continue
+            cast.append({
+                "name": name,
+                "character": member.get("character") or "",
+                "profile_path": tmdb_image_url(member.get("profilePath"), "w185"),
+            })
+
+        if media_type == "movie":
+            crew = credits.get("crew") or []
+            directors = [
+                member.get("name")
+                for member in crew
+                if str(member.get("job", "")).lower() == "director" and member.get("name")
+            ]
+            runtime = data.get("runtime")
+        else:
+            directors = [
+                creator.get("name")
+                for creator in data.get("createdBy", [])
+                if creator.get("name")
+            ]
+            run_times = data.get("episodeRunTime") or []
+            runtime = run_times[0] if run_times else None
+
+        return {
+            "available": True,
+            "tmdb_id": str(data.get("id") or ""),
+            "media_type": media_type,
+            "title": data.get("title") or data.get("name") or "",
+            "tagline": data.get("tagline") or "",
+            "overview": data.get("overview") or "",
+            "genres": genres,
+            "runtime": runtime,
+            "director": directors,
+            "cast": cast,
+            "trailer": cls._pick_trailer_url(data.get("relatedVideos")),
+        }
+
+    async def get_media_details(self, tmdb_id, media_type):
+        """
+        Fetch rich media metadata from Seer's movie/tv detail endpoint.
+
+        :param tmdb_id: TMDB id for the requested item.
+        :param media_type: ``movie`` or ``tv``.
+        :return: Normalized metadata dict, or None when Seer has no detail payload.
+        """
+        data = await self._fetch_media_detail_payload(tmdb_id, media_type)
+        if not data:
+            return None
+        return self._format_media_details(data, media_type)
 
     async def delete_media_file_by_tmdb(self, tmdb_id, media_type):
         """Delete files (via arr) for the Seer media matching tmdb_id. Returns True on success."""

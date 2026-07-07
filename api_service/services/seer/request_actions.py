@@ -120,6 +120,24 @@ def _lookup_entries(index: dict, media_type: str, tmdb_id: str) -> list[dict[str
     return list(index.get((media_type, str(tmdb_id)), []))
 
 
+async def get_request_details(
+    db: DatabaseManager,
+    tmdb_id: str,
+    media_type: str,
+) -> dict[str, Any]:
+    """Return rich Seer-backed metadata for a SuggestArr request item."""
+    media_type = _normalize_media_type(media_type)
+    async with _create_client() as client:
+        details = await client.get_media_details(tmdb_id, media_type)
+    if not details:
+        return {
+            "available": False,
+            "tmdb_id": str(tmdb_id),
+            "media_type": media_type,
+        }
+    return details
+
+
 async def get_request_seer_status(
     db: DatabaseManager,
     tmdb_id: str,

@@ -138,6 +138,10 @@ export const rateRequestOnTrakt = (tmdbId, mediaType, userId, ratingStars) => {
     });
 };
 
+export const getRequestDetails = (tmdbId, mediaType) => {
+    return axios.get(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/details`);
+};
+
 export const getRequestSeerStatus = (tmdbId, mediaType) => {
     return axios.get(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/seer/status`);
 };

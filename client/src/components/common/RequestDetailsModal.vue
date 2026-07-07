@@ -127,6 +127,16 @@
 
             <div class="request-details-modal__details-section">
               <h2 class="request-details-modal__title">{{ selectedSource.title }}</h2>
+              <p v-if="displayTagline" class="request-details-modal__tagline">{{ displayTagline }}</p>
+
+              <div v-if="displayGenres.length" class="request-details-modal__genres">
+                <span
+                  v-for="genre in displayGenres"
+                  :key="genre"
+                  class="request-details-modal__genre-pill">
+                  {{ genre }}
+                </span>
+              </div>
 
               <div v-if="hasContextRows" class="request-details-modal__context">
                 <div v-if="requestMethodLabel" class="request-details-modal__context-row">
@@ -167,6 +177,14 @@
                   <i class="fas fa-user"></i>
                   <span>Requested for <strong>{{ selectedSource.user_name }}</strong></span>
                 </div>
+                <div v-if="runtimeLabel" class="request-details-modal__context-row">
+                  <i class="fas fa-clock"></i>
+                  <span>Runtime <strong>{{ runtimeLabel }}</strong></span>
+                </div>
+                <div v-if="directorLabel" class="request-details-modal__context-row">
+                  <i class="fas fa-user-tie"></i>
+                  <span>{{ directorHeading }} <strong>{{ directorLabel }}</strong></span>
+                </div>
               </div>
 
               <div class="request-details-modal__separator"></div>
@@ -186,7 +204,50 @@
                   <i class="fas fa-align-left"></i>
                   Overview
                 </h3>
-                <p class="request-details-modal__overview">{{ selectedSource.overview || 'No overview available.' }}</p>
+                <p v-if="detailsLoading" class="request-details-modal__overview request-details-modal__overview--muted">
+                  Loading details...
+                </p>
+                <p v-else class="request-details-modal__overview">{{ displayOverview }}</p>
+                <p v-if="detailsError" class="request-details-modal__details-error">{{ detailsError }}</p>
+              </div>
+
+              <div v-if="displayCast.length" class="request-details-modal__section">
+                <h3 class="request-details-modal__section-title">
+                  <i class="fas fa-users"></i>
+                  Cast
+                </h3>
+                <div class="request-details-modal__cast-list">
+                  <div
+                    v-for="member in displayCast"
+                    :key="`${member.name}-${member.character}`"
+                    class="request-details-modal__cast-item">
+                    <div class="request-details-modal__cast-photo-wrap">
+                      <img
+                        v-if="member.profile_path"
+                        :src="member.profile_path"
+                        :alt="member.name"
+                        class="request-details-modal__cast-photo" />
+                      <div v-else class="request-details-modal__cast-photo-placeholder">
+                        <i class="fas fa-user"></i>
+                      </div>
+                    </div>
+                    <div class="request-details-modal__cast-meta">
+                      <strong class="request-details-modal__cast-name">{{ member.name }}</strong>
+                      <span v-if="member.character" class="request-details-modal__cast-character">{{ member.character }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="displayTrailer" class="request-details-modal__section">
+                <a
+                  :href="displayTrailer"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="request-details-modal__trailer-btn">
+                  <i class="fab fa-youtube"></i>
+                  Watch Trailer
+                </a>
               </div>
 
               <div v-if="selectedSource.requests && selectedSource.requests.length > 0" class="request-details-modal__section">
@@ -281,6 +342,7 @@
 
 <script>
 import { formatDate } from '@/utils/dateUtils.js';
+import { getRequestDetails } from '@/api/api.js';
 import {
   getRequestMethodMetadata,
   getRequestSourceContentMetadata,
@@ -393,6 +455,14 @@ export default {
       default: () => ({ ...DEFAULT_RATING_BADGE_SETTINGS }),
     },
   },
+  data() {
+    return {
+      details: null,
+      detailsLoading: false,
+      detailsError: '',
+      detailsRequestToken: 0,
+    };
+  },
   emits: [
     'close',
     'select-related',
@@ -406,6 +476,23 @@ export default {
     'approve-related-seer',
     'decline-related-seer',
   ],
+  watch: {
+    show(value) {
+      if (!value) {
+        this.resetDetails();
+        return;
+      }
+      this.fetchDetailsForSelection();
+    },
+    selectedSource: {
+      deep: true,
+      handler() {
+        if (this.show) {
+          this.fetchDetailsForSelection();
+        }
+      },
+    },
+  },
   computed: {
     posterDateLabel() {
       if (this.selectedSource?.requested_at) {
@@ -424,8 +511,63 @@ export default {
         this.traktModalTarget ||
         this.selectedSource?.source_origin === 'trakt_history' ||
         this.sourceContentMetadata ||
-        this.selectedSource?.user_name
+        this.selectedSource?.user_name ||
+        this.runtimeLabel ||
+        this.directorLabel
       );
+    },
+    shouldFetchDetails() {
+      return Boolean(
+        this.selectedSource?.request_id &&
+        this.selectedSource?.media_type &&
+        !this.selectedSource?.requests?.length
+      );
+    },
+    displayTagline() {
+      return this.details?.tagline || '';
+    },
+    displayGenres() {
+      return Array.isArray(this.details?.genres) ? this.details.genres : [];
+    },
+    displayCast() {
+      return Array.isArray(this.details?.cast) ? this.details.cast : [];
+    },
+    displayTrailer() {
+      return this.details?.trailer || '';
+    },
+    displayOverview() {
+      if (this.details?.overview) {
+        return this.details.overview;
+      }
+      return this.selectedSource?.overview || 'No overview available.';
+    },
+    runtimeLabel() {
+      const runtime = this.details?.runtime;
+      if (!runtime) {
+        return '';
+      }
+      if (this.selectedSource?.media_type === 'tv') {
+        return `${runtime} min / episode`;
+      }
+      const hours = Math.floor(runtime / 60);
+      const minutes = runtime % 60;
+      if (hours > 0 && minutes > 0) {
+        return `${hours}h ${minutes}m`;
+      }
+      if (hours > 0) {
+        return `${hours}h`;
+      }
+      return `${minutes}m`;
+    },
+    directorHeading() {
+      return this.selectedSource?.media_type === 'tv' ? 'Created by' : 'Director';
+    },
+    directorLabel() {
+      const directors = this.details?.director;
+      if (!Array.isArray(directors) || !directors.length) {
+        return '';
+      }
+      return directors.join(', ');
     },
     hasExtraRatings() {
       const source = this.selectedSource || {};
@@ -481,6 +623,49 @@ export default {
   },
   methods: {
     formatDate,
+    resetDetails() {
+      this.details = null;
+      this.detailsLoading = false;
+      this.detailsError = '';
+      this.detailsRequestToken += 1;
+    },
+    async fetchDetailsForSelection() {
+      if (!this.shouldFetchDetails) {
+        this.resetDetails();
+        return;
+      }
+
+      const requestToken = this.detailsRequestToken + 1;
+      this.detailsRequestToken = requestToken;
+      this.details = null;
+      this.detailsLoading = true;
+      this.detailsError = '';
+
+      try {
+        const response = await getRequestDetails(
+          this.selectedSource.request_id,
+          this.selectedSource.media_type,
+        );
+        if (requestToken !== this.detailsRequestToken) {
+          return;
+        }
+        const payload = response?.data || {};
+        if (payload.available === false) {
+          this.detailsError = 'Extra details are unavailable from Seer right now.';
+          return;
+        }
+        this.details = payload;
+      } catch (error) {
+        if (requestToken !== this.detailsRequestToken) {
+          return;
+        }
+        this.detailsError = error?.response?.data?.message || 'Could not load extra details.';
+      } finally {
+        if (requestToken === this.detailsRequestToken) {
+          this.detailsLoading = false;
+        }
+      }
+    },
     onSelectedRatingUpdate(value) {
       this.$emit('update:trakt-rating-stars', value);
       if (value) {
@@ -791,6 +976,116 @@ export default {
 .request-details-modal__overview--ai {
   border-left-color: var(--color-info);
   font-style: normal;
+}
+
+.request-details-modal__overview--muted {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.request-details-modal__tagline {
+  margin: -0.25rem 0 var(--spacing-md);
+  color: var(--color-text-muted);
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.request-details-modal__genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-md);
+}
+
+.request-details-modal__genre-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.65rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-primary-alpha-20);
+  border: 1px solid var(--color-primary-alpha-20);
+  color: var(--color-primary-light);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.request-details-modal__details-error {
+  margin-top: var(--spacing-sm);
+  color: var(--color-warning-light);
+  font-size: var(--font-size-sm);
+}
+
+.request-details-modal__cast-list {
+  display: flex;
+  gap: var(--spacing-sm);
+  overflow-x: auto;
+  padding-bottom: var(--spacing-xs);
+}
+
+.request-details-modal__cast-item {
+  flex: 0 0 110px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.request-details-modal__cast-photo-wrap {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+}
+
+.request-details-modal__cast-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.request-details-modal__cast-photo-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+.request-details-modal__cast-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.request-details-modal__cast-name {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  line-height: 1.2;
+}
+
+.request-details-modal__cast-character {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.request-details-modal__trailer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-danger);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  font-weight: 600;
+  transition: var(--transition-base);
+}
+
+.request-details-modal__trailer-btn:hover {
+  filter: brightness(1.08);
 }
 
 .request-details-modal__requests-list {

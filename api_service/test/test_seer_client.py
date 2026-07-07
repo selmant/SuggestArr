@@ -729,5 +729,101 @@ class TestSubmitQueuedRequest(unittest.IsolatedAsyncioTestCase):
         mock_fallback.assert_not_called()
 
 
+# ---------------------------------------------------------------------------
+# media details
+# ---------------------------------------------------------------------------
+
+class TestFormatMediaDetails(unittest.TestCase):
+
+    def test_formats_movie_details_with_trailer_and_cast(self):
+        payload = {
+            "id": 550,
+            "title": "Fight Club",
+            "tagline": "Mischief. Mayhem. Soap.",
+            "overview": "A ticking-time-bomb insomniac...",
+            "runtime": 139,
+            "genres": [{"id": 18, "name": "Drama"}],
+            "credits": {
+                "cast": [
+                    {"name": "Brad Pitt", "character": "Tyler Durden", "profilePath": "/brad.jpg"},
+                ],
+                "crew": [
+                    {"name": "David Fincher", "job": "Director"},
+                ],
+            },
+            "relatedVideos": [
+                {"site": "YouTube", "type": "Teaser", "key": "teaser"},
+                {"site": "YouTube", "type": "Trailer", "key": "trailer123"},
+            ],
+        }
+
+        result = SeerClient._format_media_details(payload, "movie")
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["title"], "Fight Club")
+        self.assertEqual(result["tagline"], "Mischief. Mayhem. Soap.")
+        self.assertEqual(result["genres"], ["Drama"])
+        self.assertEqual(result["runtime"], 139)
+        self.assertEqual(result["director"], ["David Fincher"])
+        self.assertEqual(len(result["cast"]), 1)
+        self.assertIn("brad.jpg", result["cast"][0]["profile_path"])
+        self.assertEqual(result["trailer"], "https://www.youtube.com/watch?v=trailer123")
+
+    def test_formats_tv_details_with_created_by_and_episode_runtime(self):
+        payload = {
+            "id": 1399,
+            "name": "Game of Thrones",
+            "overview": "Nine noble families fight...",
+            "episodeRunTime": [57],
+            "genres": [{"name": "Drama"}, {"name": "Fantasy"}],
+            "createdBy": [{"name": "David Benioff"}, {"name": "D.B. Weiss"}],
+            "credits": {"cast": [{"name": "Peter Dinklage", "character": "Tyrion Lannister"}]},
+            "relatedVideos": [],
+        }
+
+        result = SeerClient._format_media_details(payload, "tv")
+
+        self.assertEqual(result["title"], "Game of Thrones")
+        self.assertEqual(result["runtime"], 57)
+        self.assertEqual(result["director"], ["David Benioff", "D.B. Weiss"])
+        self.assertEqual(result["genres"], ["Drama", "Fantasy"])
+        self.assertIsNone(result["trailer"])
+
+    def test_pick_trailer_falls_back_to_any_youtube_video(self):
+        videos = [
+            {"site": "Vimeo", "type": "Trailer", "key": "skip"},
+            {"site": "YouTube", "type": "Clip", "key": "clip123"},
+        ]
+        self.assertEqual(
+            SeerClient._pick_trailer_url(videos),
+            "https://www.youtube.com/watch?v=clip123",
+        )
+
+
+class TestGetMediaDetails(unittest.IsolatedAsyncioTestCase):
+
+    async def test_returns_none_when_seer_has_no_payload(self):
+        client = _make_client()
+        with patch.object(client, "_fetch_media_detail_payload", AsyncMock(return_value=None)):
+            result = await client.get_media_details("123", "movie")
+        self.assertIsNone(result)
+
+    async def test_returns_formatted_details_on_success(self):
+        client = _make_client()
+        payload = {
+            "id": 101,
+            "title": "Example",
+            "overview": "Overview",
+            "runtime": 90,
+            "genres": [],
+            "credits": {"cast": [], "crew": []},
+            "relatedVideos": [],
+        }
+        with patch.object(client, "_fetch_media_detail_payload", AsyncMock(return_value=payload)):
+            result = await client.get_media_details("101", "movie")
+        self.assertEqual(result["title"], "Example")
+        self.assertTrue(result["available"])
+
+
 if __name__ == '__main__':
     unittest.main()

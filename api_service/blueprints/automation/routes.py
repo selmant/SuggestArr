@@ -17,6 +17,7 @@ from api_service.services.trakt.request_actions import (
 from api_service.services.seer.request_actions import (
     approve_request as approve_seer_request,
     decline_request as decline_seer_request,
+    get_request_details,
     get_request_seer_status,
     get_request_seer_statuses_batch,
 )
@@ -269,6 +270,25 @@ def rate_request_route(tmdb_id: str, media_type: str):
         return jsonify({"message": str(exc)}), 502
     except Exception as exc:
         logger.error("Error rating request on Trakt: %s", exc, exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/<tmdb_id>/<media_type>/details', methods=['GET'])
+def get_request_details_route(tmdb_id: str, media_type: str):
+    """Return rich Seer-backed metadata for a request item."""
+    try:
+        media_type = _validate_media_type(media_type)
+        result = async_to_sync(get_request_details)(
+            DatabaseManager(), tmdb_id, media_type,
+        )
+        return jsonify(result), 200
+    except ValueError as exc:
+        return jsonify({"message": str(exc)}), 400
+    except RuntimeError as exc:
+        logger.warning("Seer details failed for %s/%s: %s", media_type, tmdb_id, exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error fetching request details: %s", exc, exc_info=True)
         return jsonify({"error": "An internal error occurred"}), 500
 
 

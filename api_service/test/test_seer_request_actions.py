@@ -8,6 +8,7 @@ from api_service.services.seer import request_actions
 class FakeSeerClient:
     instances = []
     decline_should_fail = False
+    media_details_response = None
 
     def __init__(self, api_url, api_key, session_token=None, **kwargs):
         self.api_url = api_url
@@ -16,7 +17,11 @@ class FakeSeerClient:
         self.index = {}
         self.approve_request = AsyncMock(return_value=True)
         self.decline_request = AsyncMock(side_effect=self._decline_side_effect)
+        self.get_media_details = AsyncMock(side_effect=self._get_media_details_side_effect)
         FakeSeerClient.instances.append(self)
+
+    async def _get_media_details_side_effect(self, tmdb_id, media_type):
+        return FakeSeerClient.media_details_response
 
     async def _decline_side_effect(self, request_id):
         if FakeSeerClient.decline_should_fail:
@@ -44,6 +49,43 @@ def _configured_env():
             },
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_get_request_details_returns_unavailable_when_seer_has_no_payload():
+    db = MagicMock()
+    FakeSeerClient.instances = []
+    FakeSeerClient.media_details_response = None
+
+    with patch.object(request_actions, "SeerClient", FakeSeerClient), \
+            patch.object(request_actions, "load_env_vars", return_value=_configured_env()):
+        result = await request_actions.get_request_details(db, "999", "movie")
+
+    assert result["available"] is False
+    assert result["tmdb_id"] == "999"
+    assert result["media_type"] == "movie"
+
+
+@pytest.mark.asyncio
+async def test_get_request_details_returns_formatted_payload():
+    db = MagicMock()
+    FakeSeerClient.instances = []
+    FakeSeerClient.media_details_response = {
+        "available": True,
+        "tmdb_id": "123",
+        "media_type": "movie",
+        "title": "Example",
+        "genres": ["Drama"],
+        "cast": [],
+    }
+
+    with patch.object(request_actions, "SeerClient", FakeSeerClient), \
+            patch.object(request_actions, "load_env_vars", return_value=_configured_env()):
+        result = await request_actions.get_request_details(db, "123", "movie")
+
+    assert result["available"] is True
+    assert result["title"] == "Example"
+    assert result["genres"] == ["Drama"]
 
 
 @pytest.mark.asyncio
