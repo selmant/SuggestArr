@@ -2227,6 +2227,62 @@ class DatabaseManager:
             cursor.execute("SELECT media_type, tmdb_request_id FROM requests")
             return {(str(row[0]), str(row[1])) for row in cursor.fetchall()}
 
+    def get_suggestarr_request_keys(self) -> set:
+        """Return ``(media_type, tmdb_id)`` keys visible in the Requests UI."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT media_type, tmdb_request_id FROM requests WHERE requested_by = 'SuggestArr'"
+            )
+            return {(str(row[0]), str(row[1])) for row in cursor.fetchall()}
+
+    def get_legacy_seer_request_keys(self) -> set:
+        """Return ``(media_type, tmdb_id)`` keys stored with legacy ``requested_by = 'Seer'``."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT media_type, tmdb_request_id FROM requests WHERE requested_by = 'Seer'"
+            )
+            return {(str(row[0]), str(row[1])) for row in cursor.fetchall()}
+
+    def adopt_legacy_seer_request_row(
+        self,
+        tmdb_id: str,
+        media_type: str,
+        *,
+        rationale: Optional[str] = None,
+        requested_at: Optional[str] = None,
+        source: str = "seer_import",
+    ) -> bool:
+        """Promote a legacy Seer row so it appears in the SuggestArr Requests UI."""
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""UPDATE requests
+                    SET requested_by = 'SuggestArr',
+                        tmdb_source_id = {placeholder},
+                        source_origin = {placeholder},
+                        rationale = COALESCE({placeholder}, rationale)
+                    WHERE tmdb_request_id = {placeholder}
+                      AND media_type = {placeholder}
+                      AND requested_by = 'Seer'""",
+                (source, source, rationale, str(tmdb_id), media_type),
+            )
+            updated = cursor.rowcount > 0
+            if updated and requested_at:
+                cursor.execute(
+                    f"""UPDATE requests
+                        SET requested_at = {placeholder}
+                        WHERE tmdb_request_id = {placeholder}
+                          AND media_type = {placeholder}
+                          AND requested_by = 'SuggestArr'
+                          AND tmdb_source_id = {placeholder}""",
+                    (requested_at, str(tmdb_id), media_type, source),
+                )
+            conn.commit()
+            return updated
+
     def get_suggestarr_requests_older_than(self, cutoff_iso: str) -> list:
         """Return SuggestArr-originated requests requested before cutoff."""
         placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'

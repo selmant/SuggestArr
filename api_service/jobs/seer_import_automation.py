@@ -1,6 +1,7 @@
 """Seer request import automation: add Seer request media into SuggestArr DB.
 
 Imports all Seer request statuses for media not yet tracked in SuggestArr.
+Legacy rows with ``requested_by = 'Seer'`` are adopted into the Requests UI.
 After import, existing approve/decline actions sync back to Seer by tmdb_id.
 """
 
@@ -82,6 +83,72 @@ async def _ensure_metadata(
     return False
 
 
+async def _apply_candidate(
+    *,
+    db: DatabaseManager,
+    client: SeerClient,
+    candidate: Dict[str, Any],
+    dry_run: bool,
+    action_prefix: str,
+) -> Tuple[str, bool]:
+    """Import or adopt one candidate. Returns action name and metadata fallback flag."""
+    title = candidate["title"]
+    seer_status = candidate["seer_status"]
+    reason = (
+        f"{action_prefix} from Seer ({seer_status}, "
+        f"{candidate['seer_request_count']} request record(s))."
+    )
+
+    if dry_run:
+        db.add_seer_import_log(
+            tmdb_id=candidate["tmdb_id"],
+            media_type=candidate["media_type"],
+            title=title,
+            action=f"would_{action_prefix.lower()}",
+            was_dry_run=True,
+            reason=reason,
+        )
+        return f"would_{action_prefix.lower()}", False
+
+    used_fallback = not await _ensure_metadata(
+        client,
+        db,
+        candidate["tmdb_id"],
+        candidate["media_type"],
+        title,
+    )
+
+    if action_prefix == "Adopted":
+        db.adopt_legacy_seer_request_row(
+            candidate["tmdb_id"],
+            candidate["media_type"],
+            rationale=reason,
+            requested_at=candidate.get("requested_at"),
+            source=SEER_IMPORT_SOURCE,
+        )
+        action = "adopted"
+    else:
+        db.save_request(
+            candidate["media_type"],
+            candidate["tmdb_id"],
+            SEER_IMPORT_SOURCE,
+            source_origin=SEER_IMPORT_SOURCE,
+            rationale=reason,
+            requested_at=candidate.get("requested_at"),
+        )
+        action = "imported"
+
+    db.add_seer_import_log(
+        tmdb_id=candidate["tmdb_id"],
+        media_type=candidate["media_type"],
+        title=title,
+        action=action,
+        was_dry_run=False,
+        reason=reason,
+    )
+    return action, used_fallback
+
+
 async def execute_seer_import_job(
     force_run: bool = False,
     override_dry_run: Optional[bool] = None,
@@ -126,72 +193,65 @@ async def execute_seer_import_job(
         False,
     )
 
-    would_import = imported = skipped = metadata_fallback = errors = 0
+    would_import = would_adopt = imported = adopted = skipped = metadata_fallback = errors = 0
 
     try:
         index = await seer_client.get_requests_index()
-        existing_keys = db.get_existing_request_keys()
+        suggestarr_keys = db.get_suggestarr_request_keys()
+        legacy_seer_keys = db.get_legacy_seer_request_keys()
         candidates = _collect_import_candidates(index)
         logger.info(
-            "Seer request import: %d unique media key(s), %d already in SuggestArr (dry_run=%s).",
+            "Seer request import: %d unique media key(s), %d in Requests UI, "
+            "%d legacy Seer rows (dry_run=%s).",
             len(candidates),
-            len(existing_keys),
+            len(suggestarr_keys),
+            len(legacy_seer_keys),
             dry_run,
         )
 
         for candidate in candidates:
             key: Tuple[str, str] = (candidate["media_type"], candidate["tmdb_id"])
             title = candidate["title"]
-            seer_status = candidate["seer_status"]
-            reason = (
-                f"Imported from Seer ({seer_status}, {candidate['seer_request_count']} request record(s))."
-            )
 
-            if key in existing_keys:
+            if key in suggestarr_keys:
                 skipped += 1
                 continue
 
-            if dry_run:
-                would_import += 1
-                db.add_seer_import_log(
-                    tmdb_id=candidate["tmdb_id"],
-                    media_type=candidate["media_type"],
-                    title=title,
-                    action="would_import",
-                    was_dry_run=True,
-                    reason=reason,
-                )
-                continue
+            if key in legacy_seer_keys:
+                action_prefix = "Adopted"
+            else:
+                action_prefix = "Imported"
 
             try:
-                used_fallback = not await _ensure_metadata(
-                    seer_client,
-                    db,
-                    candidate["tmdb_id"],
-                    candidate["media_type"],
-                    title,
+                if dry_run:
+                    action, used_fallback = await _apply_candidate(
+                        db=db,
+                        client=seer_client,
+                        candidate=candidate,
+                        dry_run=True,
+                        action_prefix=action_prefix,
+                    )
+                    if action == "would_adopted":
+                        would_adopt += 1
+                    else:
+                        would_import += 1
+                    continue
+
+                action, used_fallback = await _apply_candidate(
+                    db=db,
+                    client=seer_client,
+                    candidate=candidate,
+                    dry_run=False,
+                    action_prefix=action_prefix,
                 )
                 if used_fallback:
                     metadata_fallback += 1
-
-                db.save_request(
-                    candidate["media_type"],
-                    candidate["tmdb_id"],
-                    SEER_IMPORT_SOURCE,
-                    source_origin=SEER_IMPORT_SOURCE,
-                    rationale=reason,
-                    requested_at=candidate.get("requested_at"),
-                )
-                existing_keys.add(key)
-                imported += 1
-                db.add_seer_import_log(
-                    tmdb_id=candidate["tmdb_id"],
-                    media_type=candidate["media_type"],
-                    title=title,
-                    action="imported",
-                    was_dry_run=False,
-                    reason=reason,
-                )
+                if action == "adopted":
+                    adopted += 1
+                    legacy_seer_keys.discard(key)
+                else:
+                    imported += 1
+                suggestarr_keys.add(key)
             except Exception as exc:
                 errors += 1
                 logger.error(
@@ -215,11 +275,19 @@ async def execute_seer_import_job(
             pass
         invalidate_requests_index_cache()
 
-    summary = (
-        f"candidates={len(candidates)} "
-        f"{'would_import' if dry_run else 'imported'}={would_import if dry_run else imported} "
-        f"skipped_existing={skipped} metadata_fallback={metadata_fallback} errors={errors}"
-    )
+    if dry_run:
+        changed = would_import + would_adopt
+        summary = (
+            f"candidates={len(candidates)} would_import={would_import} would_adopt={would_adopt} "
+            f"skipped_existing={skipped} metadata_fallback=0 errors={errors}"
+        )
+    else:
+        changed = imported + adopted
+        summary = (
+            f"candidates={len(candidates)} imported={imported} adopted={adopted} "
+            f"skipped_existing={skipped} metadata_fallback={metadata_fallback} errors={errors}"
+        )
+
     db.update_seer_import_settings(
         last_run_at=_utcnow_for_db(),
         last_run_status=("dry_run" if dry_run else "ok"),
@@ -231,8 +299,11 @@ async def execute_seer_import_job(
         "summary": summary,
         "dry_run": dry_run,
         "would_import": would_import,
+        "would_adopt": would_adopt,
         "imported": imported,
+        "adopted": adopted,
         "skipped": skipped,
         "metadata_fallback": metadata_fallback,
         "errors": errors,
+        "changed": changed,
     }
