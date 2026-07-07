@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import Any, Optional
 
 from api_service.config.config import load_env_vars
 from api_service.db.database_manager import DatabaseManager
 from api_service.services.seer.seer_client import SeerClient
-from api_service.services.seer.seer_status import derive_seer_status, is_pending_status
+from api_service.services.seer.seer_status import (
+    derive_seer_status,
+    is_pending_status,
+    parse_seer_timestamp,
+)
 
 _VALID_MEDIA_TYPES = {"movie", "tv"}
 _INDEX_CACHE_TTL_SECONDS = 5.0
@@ -81,6 +86,55 @@ async def _get_requests_index(client: SeerClient, *, force: bool = False) -> dic
     _index_cache["fetched_at"] = now
     _index_cache["index"] = index
     return index
+
+
+def _format_utc_timestamp(dt: datetime) -> str:
+    """Return UTC timestamp text compatible with SQL CURRENT_TIMESTAMP."""
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _utcnow_for_db() -> str:
+    return _format_utc_timestamp(datetime.utcnow())
+
+
+def _format_seer_updated_at(entry: dict[str, Any]) -> Optional[str]:
+    """Return a DB-friendly Seer updated timestamp from a request entry."""
+    for field in ("updated_at", "created_at"):
+        parsed = parse_seer_timestamp(entry.get(field))
+        if parsed is not None:
+            return _format_utc_timestamp(parsed)
+    return None
+
+
+def _persist_seer_state(
+    db: DatabaseManager,
+    tmdb_id: str,
+    media_type: str,
+    entries: list[dict[str, Any]],
+) -> None:
+    """Persist the latest Seer status snapshot onto matching SuggestArr rows."""
+    primary = _pick_primary_entry(entries)
+    if not primary:
+        db.update_request_seer_state(
+            tmdb_id,
+            media_type,
+            seer_request_id=None,
+            seer_request_status=None,
+            seer_media_status=None,
+            seer_status="not_found",
+            seer_updated_at=_utcnow_for_db(),
+        )
+        return
+
+    db.update_request_seer_state(
+        tmdb_id,
+        media_type,
+        seer_request_id=primary.get("id"),
+        seer_request_status=primary.get("status"),
+        seer_media_status=primary.get("media_status"),
+        seer_status=derive_seer_status(primary.get("status"), primary.get("media_status")),
+        seer_updated_at=_format_seer_updated_at(primary) or _utcnow_for_db(),
+    )
 
 
 def _pick_primary_entry(entries: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
@@ -221,6 +275,7 @@ async def _apply_action(
         invalidate_requests_index_cache()
         index = await _get_requests_index(client, force=True)
         entries = _lookup_entries(index, media_type, str(tmdb_id))
+        _persist_seer_state(db, tmdb_id, media_type, entries)
         return _status_payload(tmdb_id, media_type, entries)
 
 

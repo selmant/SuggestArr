@@ -337,7 +337,6 @@ export function useRequestSeerActions() {
     seerActionLoadingByRequest.value = { ...seerActionLoadingByRequest.value, [key]: true };
     seerStatusErrorByRequest.value = { ...seerStatusErrorByRequest.value, [key]: '' };
     try {
-      await loadSeerStatusFor(item, { force: true });
       const response = await approveSeerRequest(item.request_id, item.media_type);
       applySeerStatusFor(item, response.data, { merge: false });
       const modalTarget = getModalTarget();
@@ -369,7 +368,6 @@ export function useRequestSeerActions() {
     seerActionLoadingByRequest.value = { ...seerActionLoadingByRequest.value, [key]: true };
     seerStatusErrorByRequest.value = { ...seerStatusErrorByRequest.value, [key]: '' };
     try {
-      await loadSeerStatusFor(item, { force: true });
       const response = await declineSeerRequest(item.request_id, item.media_type);
       applySeerStatusFor(item, response.data, { merge: false });
       const modalTarget = getModalTarget();

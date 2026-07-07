@@ -237,6 +237,44 @@ async def test_decline_request_raises_when_seer_call_fails():
         with pytest.raises(RuntimeError, match="could not decline"):
             await request_actions.decline_request(db, "7", "movie")
 
+    db.update_request_seer_state.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_decline_request_persists_seer_state_to_db():
+    db = MagicMock()
+    FakeSeerClient.instances = []
+    FakeSeerClient.decline_should_fail = False
+    index_state = {
+        ("movie", "7"): [{"id": 3, "status": 1, "media_status": 2}],
+    }
+    call_count = {"force": 0}
+
+    async def refresh_index(client, *, force=False):
+        if force:
+            call_count["force"] += 1
+            if call_count["force"] >= 2:
+                index_state[("movie", "7")] = [
+                    {"id": 3, "status": 3, "media_status": 2, "updated_at": "2026-01-01T00:00:00Z"},
+                ]
+        return index_state
+
+    with patch.object(request_actions, "SeerClient", FakeSeerClient), \
+            patch.object(request_actions, "load_env_vars", return_value=_configured_env()), \
+            patch.object(request_actions, "_get_requests_index", side_effect=refresh_index):
+        result = await request_actions.decline_request(db, "7", "movie")
+
+    assert result["seer_status"] == "declined"
+    db.update_request_seer_state.assert_called_once_with(
+        "7",
+        "movie",
+        seer_request_id=3,
+        seer_request_status=3,
+        seer_media_status=2,
+        seer_status="declined",
+        seer_updated_at="2026-01-01 00:00:00",
+    )
+
 
 def test_derive_seer_status_maps_media_states():
     from api_service.services.seer import seer_status
