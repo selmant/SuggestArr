@@ -34,6 +34,10 @@ export function useRequestTraktActions() {
   const traktStatusErrorByRequest = ref({});
 
   const batchPrefetchByUser = new Map();
+  const queuedPosterItems = new Map();
+  let posterFlushTimer = null;
+  const POSTER_BATCH_SIZE = 16;
+  const POSTER_FLUSH_MS = 120;
 
   let modalTargetResolver = () => null;
 
@@ -351,30 +355,36 @@ export function useRequestTraktActions() {
   }
 
   function prefetchPosterTraktStatuses(requests) {
-    void prefetchPosterTraktStatusesAsync(requests);
+    for (const item of (requests || [])) {
+      queuePosterTraktStatus(item);
+    }
   }
 
-  async function prefetchPosterTraktStatusesAsync(requests) {
+  function schedulePosterTraktFlush() {
+    if (posterFlushTimer) {
+      return;
+    }
+    posterFlushTimer = setTimeout(() => {
+      posterFlushTimer = null;
+      void flushPosterTraktQueue();
+    }, POSTER_FLUSH_MS);
+  }
+
+  async function flushPosterTraktQueue() {
+    const pending = [...queuedPosterItems.values()];
+    queuedPosterItems.clear();
+    if (!pending.length) {
+      return;
+    }
+
     const pendingByUser = new Map();
-
-    for (const item of (requests || [])) {
-      if (!canShowRelatedTrakt(item)) {
-        continue;
-      }
-      if (hasFreshTraktStatus(item)) {
-        const cached = getCachedTraktStatus(statusCacheKeyFor(item));
-        if (cached) {
-          applyTraktStatusFor(item, cached, { merge: false });
-        }
-        continue;
-      }
-
+    for (const item of pending) {
       const userId = resolveTraktUserId(item);
       if (!pendingByUser.has(userId)) {
         pendingByUser.set(userId, []);
       }
       const bucket = pendingByUser.get(userId);
-      if (!bucket.some((entry) => entry.request_id === item.request_id)) {
+      if (bucket.length < POSTER_BATCH_SIZE && !bucket.some((entry) => entry.request_id === item.request_id)) {
         bucket.push(item);
       }
     }
@@ -383,18 +393,31 @@ export function useRequestTraktActions() {
       if (!items.length) {
         return;
       }
-      if (batchPrefetchByUser.has(userId)) {
-        await batchPrefetchByUser.get(userId);
-        return;
-      }
-      const promise = fetchBatchStatuses(userId, items);
-      batchPrefetchByUser.set(userId, promise);
-      try {
-        await promise;
-      } finally {
-        batchPrefetchByUser.delete(userId);
-      }
+      await fetchBatchStatuses(userId, items);
     }));
+
+    if (queuedPosterItems.size > 0) {
+      schedulePosterTraktFlush();
+    }
+  }
+
+  function queuePosterTraktStatus(item) {
+    if (!canShowRelatedTrakt(item) || hasFreshTraktStatus(item)) {
+      const cached = getCachedTraktStatus(statusCacheKeyFor(item));
+      if (cached) {
+        applyTraktStatusFor(item, cached, { merge: false });
+      }
+      return;
+    }
+    queuedPosterItems.set(traktRequestKey(item), item);
+    schedulePosterTraktFlush();
+  }
+
+  async function prefetchPosterTraktStatusesAsync(requests) {
+    for (const item of (requests || [])) {
+      queuePosterTraktStatus(item);
+    }
+    await flushPosterTraktQueue();
   }
 
   async function rateSelectedOnTraktForSource(source) {
@@ -510,6 +533,7 @@ export function useRequestTraktActions() {
     setTraktWatchedFor,
     rateRequestOnTraktFor,
     prefetchPosterTraktStatuses,
+    queuePosterTraktStatus,
     posterTraktProps,
     applyTraktStatus,
   };

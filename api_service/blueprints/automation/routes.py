@@ -102,6 +102,58 @@ def get_requests():
         logger.error(f"Error retrieving requests: {e}", exc_info=True)
         return jsonify({"error": "An internal error occurred"}), 500
 
+
+@automation_bp.route('/requests/flat', methods=['GET'])
+def get_requests_flat():
+    """Get automation requests as a flat paginated list."""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 24, type=int)
+        sort_by = request.args.get('sort_by', 'date-desc', type=str)
+
+        valid_sorts = ['date-desc', 'date-asc', 'title-asc', 'title-desc', 'rating-desc', 'rating-asc']
+        if sort_by not in valid_sorts:
+            sort_by = 'date-desc'
+
+        per_page = max(1, min(per_page, 100))
+        db_manager = DatabaseManager()
+        result = db_manager.get_all_requests_flat(
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+        )
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Error retrieving flat requests: {e}", exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/source/<source_id>', methods=['GET'])
+def get_requests_by_source(source_id: str):
+    """Get paginated requests for one watched-content source group."""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 50, type=int)
+        sort_by = request.args.get('sort_by', 'date-desc', type=str)
+
+        valid_sorts = ['date-desc', 'date-asc', 'title-asc', 'title-desc', 'rating-desc', 'rating-asc']
+        if sort_by not in valid_sorts:
+            sort_by = 'date-desc'
+
+        per_page = max(1, min(per_page, 200))
+        db_manager = DatabaseManager()
+        result = db_manager.get_requests_for_source(
+            source_id=source_id,
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+        )
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Error retrieving source requests: {e}", exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
 @automation_bp.route('/requests/ai-search', methods=['GET'])
 def get_ai_requests():
     """Get requests originated from AI Search with pagination and sorting."""

@@ -31,6 +31,10 @@ export function useRequestSeerActions() {
 
   let modalTargetResolver = () => null;
   let batchPrefetchPromise = null;
+  const queuedPosterItems = new Map();
+  let posterFlushTimer = null;
+  const POSTER_BATCH_SIZE = 16;
+  const POSTER_FLUSH_MS = 120;
 
   function setModalTargetResolver(resolver) {
     modalTargetResolver = typeof resolver === 'function' ? resolver : () => null;
@@ -249,43 +253,58 @@ export function useRequestSeerActions() {
   }
 
   function prefetchPosterSeerStatuses(requests) {
-    void prefetchPosterSeerStatusesAsync(requests);
+    for (const item of (requests || [])) {
+      queuePosterSeerStatus(item);
+    }
   }
 
-  async function prefetchPosterSeerStatusesAsync(requests) {
-    const pending = [];
-
-    for (const item of (requests || [])) {
-      if (!canShowRelatedSeer(item)) {
-        continue;
-      }
-      if (hasFreshSeerStatus(item)) {
-        const cached = getCachedSeerStatus(statusCacheKeyFor(item));
-        if (cached) {
-          applySeerStatusFor(item, cached, { merge: false });
-        }
-        continue;
-      }
-      if (!pending.some((entry) => entry.request_id === item.request_id)) {
-        pending.push(item);
-      }
+  function schedulePosterSeerFlush() {
+    if (posterFlushTimer) {
+      return;
     }
+    posterFlushTimer = setTimeout(() => {
+      posterFlushTimer = null;
+      void flushPosterSeerQueue();
+    }, POSTER_FLUSH_MS);
+  }
 
+  async function flushPosterSeerQueue() {
+    const pending = [...queuedPosterItems.values()].slice(0, POSTER_BATCH_SIZE);
+    queuedPosterItems.clear();
     if (!pending.length) {
       return;
     }
-
     if (batchPrefetchPromise) {
       await batchPrefetchPromise;
-      return;
     }
-
     batchPrefetchPromise = fetchBatchStatuses(pending);
     try {
       await batchPrefetchPromise;
     } finally {
       batchPrefetchPromise = null;
     }
+    if (queuedPosterItems.size > 0) {
+      schedulePosterSeerFlush();
+    }
+  }
+
+  function queuePosterSeerStatus(item) {
+    if (!canShowRelatedSeer(item) || hasFreshSeerStatus(item)) {
+      const cached = getCachedSeerStatus(statusCacheKeyFor(item));
+      if (cached) {
+        applySeerStatusFor(item, cached, { merge: false });
+      }
+      return;
+    }
+    queuedPosterItems.set(seerRequestKey(item), item);
+    schedulePosterSeerFlush();
+  }
+
+  async function prefetchPosterSeerStatusesAsync(requests) {
+    for (const item of (requests || [])) {
+      queuePosterSeerStatus(item);
+    }
+    await flushPosterSeerQueue();
   }
 
   async function approveFor(item) {
@@ -403,6 +422,7 @@ export function useRequestSeerActions() {
     approveForSource,
     declineForSource,
     prefetchPosterSeerStatuses,
+    queuePosterSeerStatus,
     posterSeerProps,
     applySeerStatus,
   };

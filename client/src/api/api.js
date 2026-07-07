@@ -107,6 +107,18 @@ export const getAiSearchRequests = (page = 1, perPage = 12, sortBy = 'date-desc'
     });
 };
 
+export const getAutomationRequestsFlat = (page = 1, perPage = 24, sortBy = 'date-desc') => {
+    return axios.get('/api/automation/requests/flat', {
+        params: { page, per_page: perPage, sort_by: sortBy },
+    });
+};
+
+export const getAutomationRequestsBySource = (sourceId, page = 1, perPage = 50, sortBy = 'date-desc') => {
+    return axios.get(`/api/automation/requests/source/${encodeURIComponent(sourceId)}`, {
+        params: { page, per_page: perPage, sort_by: sortBy },
+    });
+};
+
 export const getRequestTraktStatus = (tmdbId, mediaType, userId) => {
     return axios.get(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/trakt/status`, {
         params: { user_id: userId },

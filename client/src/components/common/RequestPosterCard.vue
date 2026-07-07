@@ -1,5 +1,11 @@
 <template>
-  <div class="request-card" :class="{ 'request-card--compact': compact }" data-testid="request-poster-card" @click="$emit('select', item)" @mouseenter="onMouseEnter">
+  <div
+    ref="cardRoot"
+    class="request-card"
+    :class="{ 'request-card--compact': compact }"
+    data-testid="request-poster-card"
+    @click="$emit('select', item)"
+    @mouseenter="onMouseEnter">
     <div class="request-card-poster" :class="posterDockClasses">
       <img
         v-if="item.poster_path"
@@ -218,8 +224,12 @@ export default {
       type: Boolean,
       default: false,
     },
+    lazyStatus: {
+      type: Boolean,
+      default: false,
+    },
   },
-  emits: ['select', 'set-trakt-watched', 'rate-trakt', 'approve-seer', 'decline-seer'],
+  emits: ['select', 'set-trakt-watched', 'rate-trakt', 'approve-seer', 'decline-seer', 'visible'],
   computed: {
     seerStatusIcon() {
       const icons = {
@@ -284,6 +294,35 @@ export default {
     onMouseEnter() {
       prefetchRequestDetails(this.item.request_id, this.item.media_type);
     },
+    onCardVisible(entries) {
+      if (!entries[0]?.isIntersecting) {
+        return;
+      }
+      this.$emit('visible', this.item);
+      if (this._visibilityObserver) {
+        this._visibilityObserver.disconnect();
+        this._visibilityObserver = null;
+      }
+    },
+  },
+  mounted() {
+    if (!this.lazyStatus || typeof IntersectionObserver === 'undefined') {
+      return;
+    }
+    this._visibilityObserver = new IntersectionObserver(this.onCardVisible, {
+      root: null,
+      rootMargin: '200px 0px',
+      threshold: 0.01,
+    });
+    if (this.$refs.cardRoot) {
+      this._visibilityObserver.observe(this.$refs.cardRoot);
+    }
+  },
+  beforeUnmount() {
+    if (this._visibilityObserver) {
+      this._visibilityObserver.disconnect();
+      this._visibilityObserver = null;
+    }
   },
 };
 </script>

@@ -192,10 +192,13 @@
 
                   <!-- Toggle Requests -->
                   <button 
-                    @click="source.showRequests = !source.showRequests"
+                    @click="toggleSourceRequests(source)"
                     class="toggle-requests-btn">
                     <i :class="source.showRequests ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
-                    <span>{{ source.showRequests ? 'Hide' : 'View' }} Requested Media ({{ source.requests.length }})</span>
+                    <span>{{ source.showRequests ? 'Hide' : 'View' }} Requested Media ({{ source.total_request_count || source.requests.length }})</span>
+                    <span v-if="source.has_more_requests && source.showRequests" class="requests-partial-note">
+                      Showing {{ source.requests.length }} of {{ source.total_request_count }}
+                    </span>
                   </button>
 
                   <!-- Requests List -->
@@ -241,6 +244,8 @@
                 source-mode="ai"
                 placeholder-icon="fas fa-magic"
                 :show-missing-rating="false"
+                lazy-status
+                @visible="onRequestCardVisible"
                 @select="openModal($event, true)" />
             </transition-group>
             <div v-if="aiRequestsHasMore" ref="loadMoreTriggerAi" class="load-more-trigger">
@@ -261,7 +266,9 @@
                 :item="request"
                 :badge-settings="ratingBadgeSettings"
                 :trakt-user-rating="getTraktStatus(request)?.rating"
+                lazy-status
                 v-bind="{ ...posterTraktProps(request), ...posterSeerProps(request) }"
+                @visible="onRequestCardVisible"
                 @set-trakt-watched="setTraktWatchedFor(request, $event)"
                 @rate-trakt="rateRequestOnTraktFor(request, $event)"
                 @approve-seer="approveFor(request)"
@@ -293,7 +300,7 @@
         </div>
 
         <!-- Initial Loading -->
-        <div v-if="loading && sources.length === 0" class="loading-initial">
+        <div v-if="loading && isInitialLoad" class="loading-initial">
           <div class="spinner"></div>
           <p>Loading your requests...</p>
         </div>
@@ -357,6 +364,8 @@ import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
 import { getRatingBadgeSettings } from '@/utils/ratingBadgeConfig.js';
 import {
   getAiSearchRequests,
+  getAutomationRequestsFlat,
+  getAutomationRequestsBySource,
 } from '@/api/api.js';
 
 export default {
@@ -386,6 +395,10 @@ export default {
       currentDefaultImageIndex: 0,
       config: {},
       sources: [],
+      flatRequests: [],
+      flatCurrentPage: 0,
+      flatTotalPages: 1,
+      flatPerPage: 24,
       viewMode: 'all-requests',
       searchQuery: "",
       sortBy: 'date-desc',
@@ -490,7 +503,10 @@ export default {
 
     filteredAllRequests() {
       const query = this.searchQuery.toLowerCase();
-      let filtered = this.filterRequestList(this.allRequestsFlat);
+      const baseList = this.viewMode === 'all-requests'
+        ? this.flatRequests
+        : this.allRequestsFlat;
+      let filtered = this.filterRequestList(baseList);
 
       if (query) {
         filtered = filtered.filter(request =>
@@ -524,7 +540,23 @@ export default {
     },
 
     hasMoreData() {
+      if (this.viewMode === 'ai-requests') {
+        return this.aiRequestsPage < this.aiRequestsTotalPages;
+      }
+      if (this.viewMode === 'all-requests') {
+        return this.flatCurrentPage < this.flatTotalPages;
+      }
       return this.currentPage < this.totalPages;
+    },
+
+    isInitialLoad() {
+      if (this.viewMode === 'ai-requests') {
+        return this.aiRequests.length === 0;
+      }
+      if (this.viewMode === 'all-requests') {
+        return this.flatRequests.length === 0;
+      }
+      return this.sources.length === 0;
     },
 
     aiRequestsHasMore() {
@@ -532,8 +564,20 @@ export default {
     },
   },
   watch: {
-    viewMode(newMode) {
-      if (newMode === 'ai-requests') return; // handled by switchToAiRequests
+    viewMode(newMode, oldMode) {
+      if (newMode === 'ai-requests') {
+        if (this.aiRequests.length === 0) {
+          this.fetchAiRequests(1);
+        }
+        return;
+      }
+      if (newMode !== oldMode) {
+        if (newMode === 'all-requests' && this.flatRequests.length === 0) {
+          this.fetchFlatRequests(1);
+        } else if (newMode === 'by-content' && this.sources.length === 0) {
+          this.fetchRequests(1);
+        }
+      }
       this.$nextTick(() => {
         setTimeout(() => {
           this.initObserver();
@@ -556,12 +600,6 @@ export default {
     },
 
     seerStatusFilter() {
-      if (this.seerStatusFilter !== 'all') {
-        const items = this.viewMode === 'ai-requests'
-          ? this.aiRequests
-          : this.allRequestsFlat;
-        this.prefetchPosterSeerStatuses(items);
-      }
       this.reinitObserverAfterFilter();
     },
     
@@ -666,16 +704,78 @@ export default {
     },
 
     resetAndReload() {
-      console.log('🔄 Sorting changed, reloading data...');
-
       this.cleanupObserver();
+      this.retryCount = 0;
+
+      if (this.viewMode === 'all-requests') {
+        this.flatRequests = [];
+        this.flatCurrentPage = 0;
+        this.flatTotalPages = 1;
+        this.fetchFlatRequests(1);
+        return;
+      }
 
       this.sources = [];
       this.currentPage = 0;
       this.totalPages = 1;
-      this.retryCount = 0;
-
       this.fetchRequests(1);
+    },
+
+    onRequestCardVisible(item) {
+      this.queuePosterTraktStatus(item);
+      this.queuePosterSeerStatus(item);
+    },
+
+    async toggleSourceRequests(source) {
+      if (source.showRequests) {
+        source.showRequests = false;
+        return;
+      }
+      source.showRequests = true;
+      if (source.has_more_requests && !source.requestsFullyLoaded) {
+        await this.loadAllSourceRequests(source);
+      }
+    },
+
+    async loadAllSourceRequests(source) {
+      if (source.loadingMoreRequests) {
+        return;
+      }
+      source.loadingMoreRequests = true;
+      try {
+        let page = 2;
+        const perPage = 50;
+        const totalPages = Math.max(
+          1,
+          Math.ceil((source.total_request_count || source.requests.length) / perPage),
+        );
+        while (page <= totalPages) {
+          const response = await getAutomationRequestsBySource(
+            source.id,
+            page,
+            perPage,
+            this.sortBy,
+          );
+          const extraRequests = response.data?.data?.requests || [];
+          source.requests = [
+            ...source.requests,
+            ...extraRequests.map((request) => this.mapRequestRatings(request)),
+          ];
+          page += 1;
+        }
+        source.requestsFullyLoaded = true;
+        source.has_more_requests = false;
+      } catch (error) {
+        console.error('Failed to load remaining source requests:', error);
+        this.$toast.open({
+          message: 'Could not load all requests for this source',
+          type: 'error',
+          duration: 5000,
+          position: 'top-right',
+        });
+      } finally {
+        source.loadingMoreRequests = false;
+      }
     },
 
     switchToAiRequests() {
@@ -700,7 +800,6 @@ export default {
         this.aiRequestsPage = page;
         this.aiRequestsTotalPages = total_pages;
         this.$nextTick(() => {
-          this.prefetchPosterSeerStatuses(this.aiRequests);
           setTimeout(() => this.initAiObserver(), 150);
         });
       } catch (error) {
@@ -740,7 +839,10 @@ export default {
 
     async observeIntersection(entries) {
       if (entries[0].isIntersecting && !this.loading) {
-        console.log('🔄 Lazy loading triggered for:', this.viewMode);
+        if (this.viewMode === 'all-requests') {
+          await this.fetchFlatRequests(this.flatCurrentPage + 1);
+          return;
+        }
         await this.fetchRequests(this.currentPage + 1);
       }
     },
@@ -794,6 +896,45 @@ export default {
       }
     },
 
+    async fetchFlatRequests(page = 1) {
+      if ((page > this.flatTotalPages && page > 1) || this.loading) {
+        return;
+      }
+
+      this.loading = true;
+      try {
+        const response = await getAutomationRequestsFlat(page, this.flatPerPage, this.sortBy);
+        const { data, total, total_pages: totalPages } = response.data;
+        const mapped = data.map((request) => this.mapRequestRatings(request));
+
+        if (page === 1) {
+          this.flatRequests = mapped;
+          this.totalRequestsCount = total;
+        } else {
+          this.flatRequests = [...this.flatRequests, ...mapped];
+        }
+
+        this.flatCurrentPage = page;
+        this.flatTotalPages = totalPages;
+
+        this.$nextTick(() => {
+          setTimeout(() => {
+            this.initObserver();
+          }, 150);
+        });
+      } catch (error) {
+        console.error('Failed to fetch flat requests:', error);
+        this.$toast.open({
+          message: 'Failed to load requests',
+          type: 'error',
+          duration: 5000,
+          position: 'top-right',
+        });
+      } finally {
+        this.loading = false;
+      }
+    },
+
     async fetchRequests(page = 1) {
       if (page > this.totalPages || this.loading) {
         console.log('⛔ Fetch blocked - page:', page, 'loading:', this.loading);
@@ -833,6 +974,10 @@ export default {
             title: sourceData.source_title,
           }),
           requests: sourceData.requests.map((request) => this.mapRequestRatings(request)),
+          total_request_count: sourceData.total_request_count || sourceData.requests.length,
+          has_more_requests: Boolean(sourceData.has_more_requests),
+          requestsFullyLoaded: !sourceData.has_more_requests,
+          loadingMoreRequests: false,
         }));
 
         this.sources = [...this.sources, ...newSources];
@@ -840,8 +985,6 @@ export default {
         this.currentPage = page;
 
         this.$nextTick(() => {
-          this.prefetchPosterTraktStatuses(this.allRequestsFlat);
-          this.prefetchPosterSeerStatuses(this.allRequestsFlat);
           setTimeout(() => {
             this.initObserver();
           }, 150);
@@ -875,10 +1018,6 @@ export default {
       this.$nextTick(() => {
         this.loadTraktStatusForSource(this.selectedSource);
         this.loadSeerStatusForSource(this.selectedSource);
-        if (this.selectedSource?.requests?.length) {
-          this.prefetchPosterTraktStatuses(this.selectedSource.requests);
-          this.prefetchPosterSeerStatuses(this.selectedSource.requests);
-        }
       });
     },
 
@@ -908,7 +1047,11 @@ export default {
       await this.loadTraktDefaults();
       this.setTraktModalTargetResolver(() => this.getTraktModalTarget(this.selectedSource));
       this.setSeerModalTargetResolver(() => this.getSeerModalTarget(this.selectedSource));
-      this.fetchRequests();
+      if (this.viewMode === 'all-requests') {
+        this.fetchFlatRequests(1);
+      } else {
+        this.fetchRequests(1);
+      }
 
       this.$nextTick(() => {
         this.initObserver();

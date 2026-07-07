@@ -694,6 +694,60 @@ class DatabaseManager:
         # Migrate 'viewer' role to 'user' for all existing accounts
         self._migrate_viewer_role_to_user()
 
+        self._ensure_requests_query_indexes()
+
+    def _ensure_requests_query_indexes(self):
+        """Add indexes that speed up request list queries (idempotent)."""
+        index_statements = []
+        if self.db_type in ('mysql', 'mariadb'):
+            index_statements = [
+                (
+                    "requests",
+                    "idx_requests_requested_by_at",
+                    "CREATE INDEX idx_requests_requested_by_at ON requests (requested_by, requested_at)",
+                ),
+                (
+                    "requests",
+                    "idx_requests_source_id",
+                    "CREATE INDEX idx_requests_source_id ON requests (tmdb_source_id)",
+                ),
+            ]
+        else:
+            index_statements = [
+                (
+                    "requests",
+                    "idx_requests_requested_by_at",
+                    "CREATE INDEX IF NOT EXISTS idx_requests_requested_by_at ON requests (requested_by, requested_at DESC)",
+                ),
+                (
+                    "requests",
+                    "idx_requests_source_id",
+                    "CREATE INDEX IF NOT EXISTS idx_requests_source_id ON requests (tmdb_source_id)",
+                ),
+            ]
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                for table_name, index_name, statement in index_statements:
+                    if self.db_type in ('mysql', 'mariadb'):
+                        cursor.execute(
+                            """
+                            SELECT COUNT(*)
+                            FROM information_schema.statistics
+                            WHERE table_schema = DATABASE()
+                              AND table_name = %s
+                              AND index_name = %s
+                            """,
+                            (table_name, index_name),
+                        )
+                        if (cursor.fetchone() or [0])[0]:
+                            continue
+                    cursor.execute(statement)
+                conn.commit()
+        except Exception as exc:
+            self.logger.warning("Could not ensure requests query indexes: %s", exc)
+
     def _migrate_viewer_role_to_user(self):
         """Migrate any existing auth_users with role='viewer' to role='user'."""
         try:
@@ -1585,36 +1639,34 @@ class DatabaseManager:
                 }
             return None
     
-    def get_all_requests_grouped_by_source(self, page: int = 1, per_page: int = 8, sort_by: str = 'date-desc') -> Dict[str, Any]:
-        """Retrieve all requests grouped by source with dynamic sorting and pagination."""
-        self.logger.debug(f"Retrieving all requests grouped by source: page={page}, per_page={per_page}, sort_by={sort_by}")
-    
-        count_query = """
-            SELECT 
-                COUNT(DISTINCT COALESCE(s.media_id, r.tmdb_source_id, '0')) as total_sources,
-                COUNT(r.tmdb_request_id) as total_requests
-            FROM requests r
-            JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
-            LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
-            WHERE r.requested_by = 'SuggestArr'
+    def _requests_list_filter_sql(self) -> str:
+        """Shared WHERE clause for automation request list queries."""
+        return """
+            r.requested_by = 'SuggestArr'
             AND COALESCE(r.tmdb_source_id, '') != 'ai_search'
         """
-    
-        total_sources = 0
-        total_requests = 0
-        
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Get count
-            if self.db_type in ['mysql', 'postgres']:
-                count_query = count_query.replace("?", "%s")
-            cursor.execute(count_query)
-            count_result = cursor.fetchone()
-            if count_result:
-                total_sources, total_requests = count_result
-        
-        # Handle sorting for different database types
+
+    def _requests_grouped_source_order_sql(self, sort_by: str) -> str:
+        """ORDER BY clause for paginated source groups."""
+        if self.db_type in ['mysql', 'mariadb']:
+            rating_desc = 'source_rating IS NULL, source_rating DESC'
+            rating_asc = 'source_rating IS NULL, source_rating ASC'
+        else:
+            rating_desc = 'source_rating DESC NULLS LAST'
+            rating_asc = 'source_rating ASC NULLS LAST'
+
+        mapping = {
+            'date-desc': 'max_requested_at DESC',
+            'date-asc': 'max_requested_at ASC',
+            'title-asc': 'source_title ASC',
+            'title-desc': 'source_title DESC',
+            'rating-desc': rating_desc,
+            'rating-asc': rating_asc,
+        }
+        return mapping.get(sort_by, mapping['date-desc'])
+
+    def _requests_detail_order_sql(self, sort_by: str) -> str:
+        """ORDER BY clause for rows within a grouped source query."""
         if self.db_type in ['mysql', 'mariadb']:
             sort_mapping = {
                 'date-desc': 'r.requested_at DESC, s.media_id DESC',
@@ -1622,25 +1674,292 @@ class DatabaseManager:
                 'title-asc': 's.title ASC, r.requested_at DESC',
                 'title-desc': 's.title DESC, r.requested_at DESC',
                 'rating-desc': 's.rating IS NULL, s.rating DESC, r.requested_at DESC',
-                'rating-asc': 's.rating IS NULL, s.rating ASC, r.requested_at DESC'
+                'rating-asc': 's.rating IS NULL, s.rating ASC, r.requested_at DESC',
             }
         else:
-            # PostgreSQL and SQLite support NULLS LAST
             sort_mapping = {
                 'date-desc': 'r.requested_at DESC, s.media_id DESC',
                 'date-asc': 'r.requested_at ASC, s.media_id ASC',
                 'title-asc': 's.title ASC, r.requested_at DESC',
                 'title-desc': 's.title DESC, r.requested_at DESC',
                 'rating-desc': 's.rating DESC NULLS LAST, r.requested_at DESC',
-                'rating-asc': 's.rating ASC NULLS LAST, r.requested_at DESC'
+                'rating-asc': 's.rating ASC NULLS LAST, r.requested_at DESC',
+            }
+        return sort_mapping.get(sort_by, sort_mapping['date-desc'])
+
+    def _requests_flat_order_sql(self, sort_by: str) -> str:
+        """ORDER BY clause for flat request pagination."""
+        if self.db_type in ['mysql', 'mariadb']:
+            sort_mapping = {
+                'date-desc': 'r.requested_at DESC',
+                'date-asc': 'r.requested_at ASC',
+                'title-asc': 'm.title ASC',
+                'title-desc': 'm.title DESC',
+                'rating-desc': 'm.rating IS NULL, m.rating DESC, r.requested_at DESC',
+                'rating-asc': 'm.rating IS NULL, m.rating ASC, r.requested_at DESC',
+            }
+        else:
+            sort_mapping = {
+                'date-desc': 'r.requested_at DESC',
+                'date-asc': 'r.requested_at ASC',
+                'title-asc': 'm.title ASC',
+                'title-desc': 'm.title DESC',
+                'rating-desc': 'm.rating DESC NULLS LAST, r.requested_at DESC',
+                'rating-asc': 'm.rating ASC NULLS LAST, r.requested_at DESC',
+            }
+        return sort_mapping.get(sort_by, sort_mapping['date-desc'])
+
+    def _append_grouped_request_row(self, sources: dict, source_max_dates: dict, row) -> None:
+        """Merge one grouped request SQL row into the sources accumulator."""
+        source_id = row[0]
+        requested_at = row[16]
+        source_ratings = self._metadata_ratings_payload(
+            imdb_id=row[6],
+            imdb_rating=row[7],
+            imdb_votes=row[8],
+            rt_rating=row[9],
+            rt_user_rating=row[10],
+            metacritic_rating=row[11],
+            trakt_rating=row[12],
+            trakt_votes=row[13],
+        )
+        request_ratings = self._metadata_ratings_payload(
+            imdb_id=row[24],
+            imdb_rating=row[25],
+            imdb_votes=row[26],
+            rt_rating=row[27],
+            rt_user_rating=row[28],
+            metacritic_rating=row[29],
+            trakt_rating=row[30],
+            trakt_votes=row[31],
+        )
+
+        if source_id not in sources:
+            sources[source_id] = {
+                "source_id": source_id,
+                "source_title": row[1],
+                "source_overview": row[2],
+                "source_release_date": row[3],
+                "source_poster_path": row[4],
+                "rating": round(row[5], 2) if row[5] is not None else None,
+                **{k: v for k, v in source_ratings.items() if k != 'ratings_updated_at'},
+                "media_type": row[15],
+                "logo_path": row[17],
+                "backdrop_path": row[18],
+                "is_anime": bool(row[34]) if len(row) > 34 and row[34] is not None else False,
+                "requests": [],
+            }
+            source_max_dates[source_id] = requested_at
+        elif requested_at > source_max_dates[source_id]:
+            source_max_dates[source_id] = requested_at
+
+        sources[source_id]["requests"].append({
+            "request_id": row[14],
+            "media_type": row[15],
+            "requested_at": row[16],
+            "title": row[19],
+            "overview": row[20],
+            "release_date": row[21],
+            "poster_path": row[22],
+            "backdrop_path": row[33],
+            "rating": round(row[23], 2) if row[23] is not None else None,
+            **{k: v for k, v in request_ratings.items() if k != 'ratings_updated_at'},
+            "logo_path": row[32],
+            "is_anime": bool(row[34]) if len(row) > 34 and row[34] is not None else False,
+            "rationale": row[35] if len(row) > 35 else None,
+            "user_id": row[36] if len(row) > 36 else None,
+            "user_name": row[37] if len(row) > 37 else None,
+            "source_origin": row[38] if len(row) > 38 else None,
+        })
+
+    def get_all_requests_grouped_by_source(self, page: int = 1, per_page: int = 8, sort_by: str = 'date-desc') -> Dict[str, Any]:
+        """Retrieve requests grouped by source with SQL source pagination."""
+        self.logger.debug(
+            "Retrieving all requests grouped by source: page=%s, per_page=%s, sort_by=%s",
+            page,
+            per_page,
+            sort_by,
+        )
+
+        max_requests_per_source = 50
+        ph = self._ph()
+        from api_service.services.request_sources import request_source_title_sql
+        source_title_expr = request_source_title_sql("r")
+        filter_sql = self._requests_list_filter_sql()
+
+        count_query = f"""
+            SELECT
+                COUNT(DISTINCT COALESCE(s.media_id, r.tmdb_source_id, '0')) as total_sources,
+                COUNT(r.tmdb_request_id) as total_requests
+            FROM requests r
+            JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
+            LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
+            WHERE {filter_sql}
+        """
+
+        total_sources = 0
+        total_requests = 0
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(count_query)
+            count_result = cursor.fetchone()
+            if count_result:
+                total_sources, total_requests = count_result
+
+        if total_sources == 0:
+            return {
+                "data": [],
+                "total_pages": 0,
+                "total_sources": 0,
+                "total_requests": 0,
+                "current_page": page,
+                "per_page": per_page,
             }
 
-        order_by_clause = sort_mapping.get(sort_by, sort_mapping['date-desc'])
+        source_order = self._requests_grouped_source_order_sql(sort_by)
+        detail_order = self._requests_detail_order_sql(sort_by)
+        offset = (page - 1) * per_page
+
+        source_page_query = f"""
+            SELECT
+                COALESCE(s.media_id, r.tmdb_source_id, '0') AS source_id,
+                MAX({source_title_expr}) AS source_title,
+                MAX(r.requested_at) AS max_requested_at,
+                MAX(s.rating) AS source_rating
+            FROM requests r
+            JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
+            LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
+            WHERE {filter_sql}
+            GROUP BY COALESCE(s.media_id, r.tmdb_source_id, '0')
+            ORDER BY {source_order}
+            LIMIT {ph} OFFSET {ph}
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(source_page_query, (per_page, offset))
+            source_rows = cursor.fetchall()
+
+        if not source_rows:
+            total_pages = (total_sources + per_page - 1) // per_page
+            return {
+                "data": [],
+                "total_pages": total_pages,
+                "total_sources": total_sources,
+                "total_requests": total_requests,
+                "current_page": page,
+                "per_page": per_page,
+            }
+
+        source_ids = [row[0] for row in source_rows]
+        source_order_index = {source_id: index for index, source_id in enumerate(source_ids)}
+        placeholders = ', '.join([ph] * len(source_ids))
+
+        counts_query = f"""
+            SELECT COALESCE(s.media_id, r.tmdb_source_id, '0') AS source_id, COUNT(*)
+            FROM requests r
+            LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
+            WHERE {filter_sql}
+              AND COALESCE(s.media_id, r.tmdb_source_id, '0') IN ({placeholders})
+            GROUP BY COALESCE(s.media_id, r.tmdb_source_id, '0')
+        """
+
+        detail_query = f"""
+            SELECT
+                COALESCE(s.media_id, r.tmdb_source_id, '0') AS source_id,
+                {source_title_expr} AS source_title,
+                s.overview AS source_overview,
+                s.release_date AS source_release_date, s.poster_path AS source_poster_path, s.rating as rating,
+                s.imdb_id AS source_imdb_id, s.imdb_rating AS source_imdb_rating, s.imdb_votes AS source_imdb_votes,
+                s.rt_rating AS source_rt_rating, s.rt_user_rating AS source_rt_user_rating,
+                s.metacritic_rating AS source_metacritic_rating,
+                s.trakt_rating AS source_trakt_rating, s.trakt_votes AS source_trakt_votes,
+                r.tmdb_request_id, r.media_type, r.requested_at, s.logo_path, s.backdrop_path,
+                m.title AS request_title, m.overview AS request_overview,
+                m.release_date AS request_release_date, m.poster_path AS request_poster_path, m.rating as request_rating,
+                m.imdb_id AS request_imdb_id, m.imdb_rating AS request_imdb_rating, m.imdb_votes AS request_imdb_votes,
+                m.rt_rating AS request_rt_rating, m.rt_user_rating AS request_rt_user_rating,
+                m.metacritic_rating AS request_metacritic_rating,
+                m.trakt_rating AS request_trakt_rating, m.trakt_votes AS request_trakt_votes,
+                m.logo_path, m.backdrop_path, r.is_anime, r.rationale,
+                r.user_id, u.user_name, r.source_origin
+            FROM (
+                SELECT
+                    r.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(s.media_id, r.tmdb_source_id, '0')
+                        ORDER BY {detail_order}
+                    ) AS _source_row
+                FROM requests r
+                JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
+                LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
+                WHERE {filter_sql}
+                  AND COALESCE(s.media_id, r.tmdb_source_id, '0') IN ({placeholders})
+            ) r
+            JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
+            LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
+            LEFT JOIN users u ON r.user_id = u.user_id
+            WHERE r._source_row <= {max_requests_per_source}
+            ORDER BY {detail_order}
+        """
+
+        source_counts = {}
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(counts_query, tuple(source_ids))
+            source_counts = {row[0]: row[1] for row in cursor.fetchall()}
+            cursor.execute(detail_query, tuple(source_ids))
+            result = cursor.fetchall()
+
+        sources = {}
+        source_max_dates = {}
+        for row in result:
+            self._append_grouped_request_row(sources, source_max_dates, row)
+
+        source_list = []
+        for source_id in source_ids:
+            if source_id not in sources:
+                continue
+            source_data = sources[source_id]
+            total_for_source = source_counts.get(source_id, len(source_data["requests"]))
+            source_data["total_request_count"] = total_for_source
+            source_data["has_more_requests"] = total_for_source > len(source_data["requests"])
+            source_list.append(source_data)
+
+        total_pages = (total_sources + per_page - 1) // per_page
+        return {
+            "data": source_list,
+            "total_pages": total_pages,
+            "total_sources": total_sources,
+            "total_requests": total_requests,
+            "current_page": page,
+            "per_page": per_page,
+        }
+
+    def get_requests_for_source(
+        self,
+        source_id: str,
+        page: int = 1,
+        per_page: int = 50,
+        sort_by: str = 'date-desc',
+    ) -> Dict[str, Any]:
+        """Paginate requests belonging to one source group."""
+        ph = self._ph()
+        filter_sql = self._requests_list_filter_sql()
+        order_by_clause = self._requests_detail_order_sql(sort_by)
+
+        count_query = f"""
+            SELECT COUNT(*)
+            FROM requests r
+            LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
+            WHERE {filter_sql}
+              AND COALESCE(s.media_id, r.tmdb_source_id, '0') = {ph}
+        """
 
         from api_service.services.request_sources import request_source_title_sql
         source_title_expr = request_source_title_sql("r")
-    
-        query = f"""
+
+        select_query = f"""
             SELECT
                 COALESCE(s.media_id, r.tmdb_source_id, '0') AS source_id,
                 {source_title_expr} AS source_title,
@@ -1663,122 +1982,137 @@ class DatabaseManager:
             JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
             LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
             LEFT JOIN users u ON r.user_id = u.user_id
-            WHERE r.requested_by = 'SuggestArr'
-            AND COALESCE(r.tmdb_source_id, '') != 'ai_search'
+            WHERE {filter_sql}
+              AND COALESCE(s.media_id, r.tmdb_source_id, '0') = {ph}
             ORDER BY {order_by_clause}
+            LIMIT {ph} OFFSET {ph}
         """
-        
-        if self.db_type in ['mysql', 'postgres']:
-            query = query.replace("?", "%s")
-        
+
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(query)
-            result = cursor.fetchall()
-        
-        # Group and sort results (maintaining existing logic)
+            cursor.execute(count_query, (source_id,))
+            total = (cursor.fetchone() or [0])[0]
+            offset = (page - 1) * per_page
+            cursor.execute(select_query, (source_id, per_page, offset))
+            rows = cursor.fetchall()
+
         sources = {}
         source_max_dates = {}
-        
-        for row in result:
-            source_id = row[0]
-            requested_at = row[16]
-            source_ratings = self._metadata_ratings_payload(
-                imdb_id=row[6],
-                imdb_rating=row[7],
-                imdb_votes=row[8],
-                rt_rating=row[9],
-                rt_user_rating=row[10],
-                metacritic_rating=row[11],
-                trakt_rating=row[12],
-                trakt_votes=row[13],
-            )
-            request_ratings = self._metadata_ratings_payload(
-                imdb_id=row[24],
-                imdb_rating=row[25],
-                imdb_votes=row[26],
-                rt_rating=row[27],
-                rt_user_rating=row[28],
-                metacritic_rating=row[29],
-                trakt_rating=row[30],
-                trakt_votes=row[31],
-            )
-            
-            if source_id not in sources:
-                sources[source_id] = {
-                    "source_id": source_id,
-                    "source_title": row[1],
-                    "source_overview": row[2],
-                    "source_release_date": row[3],
-                    "source_poster_path": row[4],
-                    "rating": round(row[5], 2) if row[5] is not None else None,
-                    **{k: v for k, v in source_ratings.items() if k != 'ratings_updated_at'},
-                    "media_type": row[15],
-                    "logo_path": row[17],
-                    "backdrop_path": row[18],
-                    "is_anime": bool(row[34]) if len(row) > 34 and row[34] is not None else False,
-                    "requests": []
-                }
-                source_max_dates[source_id] = requested_at
-            else:
-                if requested_at > source_max_dates[source_id]:
-                    source_max_dates[source_id] = requested_at
+        for row in rows:
+            self._append_grouped_request_row(sources, source_max_dates, row)
 
-            sources[source_id]["requests"].append({
-                "request_id": row[14],
-                "media_type": row[15],
-                "requested_at": row[16],
-                "title": row[19],
-                "overview": row[20],
-                "release_date": row[21],
-                "poster_path": row[22],
-                "backdrop_path": row[33],
-                "rating": round(row[23], 2) if row[23] is not None else None,
-                **{k: v for k, v in request_ratings.items() if k != 'ratings_updated_at'},
-                "logo_path": row[32],
-                "is_anime": bool(row[34]) if len(row) > 34 and row[34] is not None else False,
-                "rationale": row[35] if len(row) > 35 else None,
-                "user_id": row[36] if len(row) > 36 else None,
-                "user_name": row[37] if len(row) > 37 else None,
-                "source_origin": row[38] if len(row) > 38 else None,
-            })
-    
-        # Sort sources
-        source_list = []
-        for source_id, source_data in sources.items():
-            source_data['max_requested_at'] = source_max_dates[source_id]
-            source_list.append(source_data)
-    
-        # Apply sorting
-        if sort_by == 'date-desc':
-            source_list.sort(key=lambda x: x['max_requested_at'], reverse=True)
-        elif sort_by == 'date-asc':
-            source_list.sort(key=lambda x: x['max_requested_at'])
-        elif sort_by == 'title-asc':
-            source_list.sort(key=lambda x: (x['source_title'] or '').lower())
-        elif sort_by == 'title-desc':
-            source_list.sort(key=lambda x: (x['source_title'] or '').lower(), reverse=True)
-        elif sort_by == 'rating-desc':
-            source_list.sort(key=lambda x: (x['rating'] if x['rating'] is not None else -1), reverse=True)
-        elif sort_by == 'rating-asc':
-            source_list.sort(key=lambda x: (x['rating'] if x['rating'] is not None else float('inf')))
-    
-        # Clean up and paginate
-        for source in source_list:
-            del source['max_requested_at']
-    
-        total_pages = (total_sources + per_page - 1) // per_page  
-        paginated_data = source_list[(page - 1) * per_page: page * per_page]
-    
+        source_data = sources.get(source_id)
+        if not source_data:
+            source_data = {
+                "source_id": source_id,
+                "source_title": source_id,
+                "requests": [],
+            }
+
+        total_pages = max(1, (total + per_page - 1) // per_page) if total else 0
         return {
-            "data": paginated_data,
+            "data": source_data,
+            "total_requests": total,
             "total_pages": total_pages,
-            "total_sources": total_sources,
-            "total_requests": total_requests,
             "current_page": page,
-            "per_page": per_page
+            "per_page": per_page,
         }
-    
+
+    def get_all_requests_flat(
+        self,
+        page: int = 1,
+        per_page: int = 24,
+        sort_by: str = 'date-desc',
+    ) -> Dict[str, Any]:
+        """Return individual automation requests with SQL pagination."""
+        ph = self._ph()
+        filter_sql = self._requests_list_filter_sql()
+        order_by_clause = self._requests_flat_order_sql(sort_by)
+        from api_service.services.request_sources import request_source_title_sql
+        source_title_expr = request_source_title_sql("r")
+
+        count_query = f"""
+            SELECT COUNT(*)
+            FROM requests r
+            JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
+            WHERE {filter_sql}
+        """
+
+        select_query = f"""
+            SELECT
+                r.tmdb_request_id, r.media_type, r.requested_at, r.rationale,
+                m.title, m.overview, m.poster_path, m.release_date, m.rating,
+                m.backdrop_path, m.logo_path,
+                m.imdb_id, m.imdb_rating, m.imdb_votes, m.rt_rating, m.rt_user_rating, m.metacritic_rating,
+                m.trakt_rating, m.trakt_votes,
+                r.is_anime, r.user_id, u.user_name, r.source_origin,
+                COALESCE(s.media_id, r.tmdb_source_id, '0') AS source_id,
+                {source_title_expr} AS source_title,
+                s.poster_path AS source_poster_path,
+                s.backdrop_path AS source_backdrop_path,
+                s.logo_path AS source_logo_path
+            FROM requests r
+            JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
+            LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
+            LEFT JOIN users u ON r.user_id = u.user_id
+            WHERE {filter_sql}
+            ORDER BY {order_by_clause}
+            LIMIT {ph} OFFSET {ph}
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(count_query)
+            total = (cursor.fetchone() or [0])[0]
+            offset = (page - 1) * per_page
+            cursor.execute(select_query, (per_page, offset))
+            rows = cursor.fetchall()
+
+        items = []
+        for row in rows:
+            ratings = self._metadata_ratings_payload(
+                imdb_id=row[11],
+                imdb_rating=row[12],
+                imdb_votes=row[13],
+                rt_rating=row[14],
+                rt_user_rating=row[15],
+                metacritic_rating=row[16],
+                trakt_rating=row[17],
+                trakt_votes=row[18],
+            )
+            items.append({
+                "request_id": row[0],
+                "media_type": row[1],
+                "requested_at": row[2],
+                "rationale": row[3],
+                "title": row[4],
+                "overview": row[5],
+                "poster_path": row[6],
+                "release_date": row[7],
+                "rating": round(row[8], 2) if row[8] is not None else None,
+                "backdrop_path": row[9],
+                "logo_path": row[10],
+                **{k: v for k, v in ratings.items() if k != 'ratings_updated_at'},
+                "is_anime": bool(row[19]) if len(row) > 19 and row[19] is not None else False,
+                "user_id": row[20] if len(row) > 20 else None,
+                "user_name": row[21] if len(row) > 21 else None,
+                "source_origin": row[22] if len(row) > 22 else None,
+                "source_id": row[23] if len(row) > 23 else None,
+                "source_title": row[24] if len(row) > 24 else None,
+                "source_poster_path": row[25] if len(row) > 25 else None,
+                "source_backdrop_path": row[26] if len(row) > 26 else None,
+                "source_logo_path": row[27] if len(row) > 27 else None,
+            })
+
+        total_pages = max(1, (total + per_page - 1) // per_page) if total else 0
+        return {
+            "data": items,
+            "total": total,
+            "total_pages": total_pages,
+            "current_page": page,
+            "per_page": per_page,
+        }
+
     def get_requested_tmdb_ids(self) -> set:
         """Return the set of TMDB IDs (as strings) that SuggestArr has already requested.
 
