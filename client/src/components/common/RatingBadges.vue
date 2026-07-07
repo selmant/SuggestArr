@@ -12,9 +12,9 @@
       v-for="badge in badges"
       :key="badge.key"
       class="rating-badge"
-      :class="badge.className"
-      :title="badge.label">
-      <i :class="badge.icon"></i>
+      :class="[badge.className, badge.qualityClassName]"
+      :title="badge.title || badge.label">
+      <i class="rating-badge__icon" :class="badge.icon"></i>
       <span class="rating-badge__value">{{ badge.value }}</span>
     </span>
   </div>
@@ -85,64 +85,100 @@ export default {
 .rating-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.2rem;
+  gap: 0.28rem;
   min-width: 0;
   border: 1px solid var(--surface-glass-strong);
-  border-radius: var(--radius-full);
-  background-color: var(--color-bg-overlay-heavy);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background-color: rgba(10, 12, 18, 0.82);
   color: var(--color-text-primary);
   box-shadow: var(--shadow-sm);
-  font-size: 0.62rem;
-  font-weight: 700;
+  font-size: 0.78rem;
+  font-weight: 800;
   line-height: 1;
   white-space: nowrap;
-  padding: var(--spacing-2xs) var(--spacing-xs);
+  padding: 0.24rem 0.4rem;
 }
 
 .rating-badges--compact .rating-badge {
-  font-size: 0.58rem;
-  padding: 0.1rem 0.3rem;
+  font-size: 0.7rem;
+  gap: 0.22rem;
+  padding: 0.18rem 0.34rem;
 }
 
-.rating-badge i {
+.rating-badge__icon {
   flex: 0 0 auto;
-  font-size: 0.62rem;
+  font-size: 0.72rem;
+  opacity: 0.95;
 }
 
-.rating-badge--tmdb {
-  background-color: var(--color-success-alpha-20);
-  border-color: var(--color-success-alpha-20);
-  color: var(--color-success-light);
+.rating-badges--compact .rating-badge__icon {
+  font-size: 0.66rem;
 }
 
-.rating-badge--imdb {
-  background-color: rgba(245, 197, 24, 0.18);
-  border-color: rgba(245, 197, 24, 0.35);
+.rating-badge__value {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* Source identity lives in the icon color. */
+.rating-badge--tmdb .rating-badge__icon {
+  color: #21d07a;
+}
+
+.rating-badge--imdb .rating-badge__icon {
   color: #f5c518;
 }
 
-.rating-badge--rt {
-  background-color: rgba(250, 50, 10, 0.18);
-  border-color: rgba(250, 50, 10, 0.35);
-  color: #ff6b4a;
+.rating-badge--rt .rating-badge__icon {
+  color: #fa320a;
 }
 
-.rating-badge--rt-user {
-  background-color: rgba(250, 180, 50, 0.18);
-  border-color: rgba(250, 180, 50, 0.35);
+.rating-badge--rt-user .rating-badge__icon {
   color: #ffb84d;
 }
 
-.rating-badge--metacritic {
-  background-color: rgba(255, 204, 0, 0.16);
-  border-color: rgba(255, 204, 0, 0.35);
+.rating-badge--metacritic .rating-badge__icon {
   color: #ffcc00;
 }
 
-.rating-badge--trakt,
-.rating-badge--trakt-user {
-  background-color: rgba(237, 28, 36, 0.16);
-  border-color: rgba(237, 28, 36, 0.35);
+.rating-badge--trakt .rating-badge__icon,
+.rating-badge--trakt-user .rating-badge__icon {
   color: #ed1c24;
+}
+
+/*
+ * Quality drives the readable "is this good or bad?" signal: the value text,
+ * pill tint, and left accent bar all shift green -> amber -> red with the
+ * score. Falls back to a neutral pill when a source has no numeric score.
+ */
+.rating-badge--good {
+  background-color: rgba(16, 185, 129, 0.22);
+  border-color: rgba(16, 185, 129, 0.4);
+  border-left-color: var(--color-success-light);
+}
+
+.rating-badge--good .rating-badge__value {
+  color: var(--color-success-light);
+}
+
+.rating-badge--mixed {
+  background-color: rgba(245, 158, 11, 0.22);
+  border-color: rgba(245, 158, 11, 0.4);
+  border-left-color: var(--color-warning-light);
+}
+
+.rating-badge--mixed .rating-badge__value {
+  color: var(--color-warning-light);
+}
+
+.rating-badge--bad {
+  background-color: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.4);
+  border-left-color: var(--color-error-light);
+}
+
+.rating-badge--bad .rating-badge__value {
+  color: var(--color-error-light);
 }
 </style>
