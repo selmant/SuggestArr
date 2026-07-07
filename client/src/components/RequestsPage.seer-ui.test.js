@@ -29,6 +29,10 @@ test('request details modal renders Seer actions for selected and related reques
   assert.match(requestsPageSource, /useRequestSeerActions/);
   assert.match(requestsPageSource, /posterSeerProps/);
   assert.match(requestsPageSource, /prefetchPosterSeerStatuses\(mapped\)/);
+  assert.match(requestsPageSource, /refreshModalIntegrationStatuses/);
+  assert.match(requestsPageSource, /loadSeerStatusForSource\(source, \{ force: true \}\)/);
+  assert.match(requestsPageSource, /loadSeerStatusFor\(request, \{ force: true \}\)/);
+  assert.match(seerActionsSource, /loadSeerStatusForSource\(source, \{ force = false \}/);
   assert.match(requestsPageSource, /seer_status: request\.seer_status/);
   assert.doesNotMatch(requestsPageSource, /@visible="onRequestCardVisible"/);
   assert.match(requestsPageSource, /seerStatusFilter/);

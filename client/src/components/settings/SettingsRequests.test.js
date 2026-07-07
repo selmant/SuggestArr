@@ -20,6 +20,7 @@ test('recent requests and requests page reuse RequestPosterCard', () => {
   assert.match(settingsRequestsSource, /posterTraktProps\(request\)/);
   assert.match(settingsRequestsSource, /useRequestTraktActions/);
   assert.match(settingsRequestsSource, /prefetchPosterTraktStatuses/);
+  assert.match(settingsRequestsSource, /loadTraktStatusForSource\(this\.selectedRequest, \{ force: true \}\)/);
   assert.match(settingsRequestsSource, /goToRequestsPage\(\) \{/);
   assert.match(settingsRequestsSource, /source_id: source\.source_id/);
   assert.doesNotMatch(settingsRequestsSource, /class="request-card request-card-compact"/);

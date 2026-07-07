@@ -207,14 +207,14 @@ export function useRequestSeerActions() {
     }
   }
 
-  async function loadSeerStatusForSource(source) {
+  async function loadSeerStatusForSource(source, { force = false } = {}) {
     const target = getSeerModalTarget(source);
     if (!target) {
       applySeerStatus(null, { merge: false });
       return;
     }
 
-    if (hasFreshSeerStatus(target)) {
+    if (!force && hasFreshSeerStatus(target)) {
       applySeerStatus(getSeerStatus(target), { merge: false });
       return;
     }

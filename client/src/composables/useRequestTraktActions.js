@@ -257,14 +257,14 @@ export function useRequestTraktActions() {
     }
   }
 
-  async function loadTraktStatusForSource(source) {
+  async function loadTraktStatusForSource(source, { force = false } = {}) {
     const target = getTraktModalTarget(source);
     if (!target) {
       applyTraktStatus(null, { merge: false });
       return;
     }
 
-    if (hasFreshTraktStatus(target)) {
+    if (!force && hasFreshTraktStatus(target)) {
       applyTraktStatus(getTraktStatus(target), { merge: false });
       return;
     }

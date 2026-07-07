@@ -1181,6 +1181,20 @@ export default {
       this.$router.push({ name: "Home" });
     },
 
+    refreshModalIntegrationStatuses(source) {
+      this.loadTraktStatusForSource(source, { force: true });
+      this.loadSeerStatusForSource(source, { force: true });
+
+      for (const request of (source?.requests || [])) {
+        if (this.canShowRelatedTrakt(request)) {
+          this.loadTraktStatusFor(request, { force: true });
+        }
+        if (this.canShowRelatedSeer(request)) {
+          this.loadSeerStatusFor(request, { force: true });
+        }
+      }
+    },
+
     openModal(source, isAiRequest = false) {
       this.selectedSource = { ...source, _isAiRequest: isAiRequest };
       this.applyTraktStatus(null);
@@ -1190,8 +1204,7 @@ export default {
       this.showModal = true;
       document.body.style.overflow = 'hidden';
       this.$nextTick(() => {
-        this.loadTraktStatusForSource(this.selectedSource);
-        this.loadSeerStatusForSource(this.selectedSource);
+        this.refreshModalIntegrationStatuses(this.selectedSource);
       });
     },
 

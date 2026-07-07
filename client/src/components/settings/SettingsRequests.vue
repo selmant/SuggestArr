@@ -233,7 +233,7 @@ export default {
       this.showModal = true;
       document.body.style.overflow = 'hidden';
       this.$nextTick(() => {
-        this.loadTraktStatusForSource(this.selectedRequest);
+        this.loadTraktStatusForSource(this.selectedRequest, { force: true });
       });
     },
 
