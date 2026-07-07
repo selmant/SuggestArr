@@ -29,7 +29,7 @@ test('request details modal renders Seer actions for selected and related reques
   assert.match(requestPosterCardSource, /seer-poster-dock/);
   assert.match(requestsPageSource, /useRequestSeerActions/);
   assert.match(requestsPageSource, /posterSeerProps/);
-  assert.match(requestsPageSource, /void this\.prefetchRequestIntegrationStatusesAsync\(mapped\)/);
+  assert.match(requestsPageSource, /await this\.prefetchRequestIntegrationStatusesAsync\(mapped\)/);
   assert.match(requestsPageSource, /Could not prefetch request integration statuses/);
   assert.match(requestsPageSource, /refreshModalIntegrationStatuses/);
   assert.match(requestsPageSource, /loadSeerStatusForSource\(source, \{ force: true \}\)/);
@@ -44,5 +44,6 @@ test('request details modal renders Seer actions for selected and related reques
   assert.doesNotMatch(requestsPageSource, /@visible="onRequestCardVisible"/);
   assert.match(requestsPageSource, /seerStatusFilter/);
   assert.match(requestsPageSource, /SEER_STATUS_FILTER_OPTIONS/);
-  assert.match(requestsPageSource, /filterRequestList/);
+  assert.match(requestsPageSource, /refreshSeerFilterStatuses/);
+  assert.match(requestsPageSource, /filterIntegrationLoading/);
 });

@@ -140,9 +140,9 @@
         </div>
 
         <!-- View: By Content Watched -->
-        <div v-if="showInitialLoader" class="loading-initial">
+        <div v-if="showPageLoader" class="loading-initial">
           <div class="spinner"></div>
-          <p>Loading your requests...</p>
+          <p>{{ pageLoaderMessage }}</p>
         </div>
 
         <template v-else>
@@ -479,6 +479,8 @@ export default {
       selectedSource: null,
       loading: false,
       hasCompletedInitialLoad: false,
+      filterIntegrationLoading: false,
+      filterIntegrationToken: 0,
       currentPage: 1,
       totalPages: 1,
       observer: null,
@@ -654,6 +656,17 @@ export default {
       return !this.hasCompletedInitialLoad;
     },
 
+    showPageLoader() {
+      return this.showInitialLoader || this.filterIntegrationLoading;
+    },
+
+    pageLoaderMessage() {
+      if (this.filterIntegrationLoading) {
+        return 'Applying Seer filter...';
+      }
+      return 'Loading your requests...';
+    },
+
     isInitialLoad() {
       if (this.viewMode === 'ai-requests') {
         return this.aiRequests.length === 0;
@@ -720,7 +733,7 @@ export default {
     },
 
     seerStatusFilter() {
-      this.reinitObserverAfterFilter();
+      void this.refreshSeerFilterStatuses();
     },
     
     searchQuery() {
@@ -823,6 +836,51 @@ export default {
     requestMatchesSeerStatusFilter(request) {
       const status = this.getSeerStatus(request)?.seer_status || request?.seer_status;
       return matchesSeerStatusFilter(status, this.seerStatusFilter);
+    },
+
+    loadedRequestsForFilters() {
+      if (this.viewMode === 'all-requests') {
+        return this.flatRequests;
+      }
+      if (this.viewMode === 'by-content') {
+        return this.allRequestsFlat;
+      }
+      return [];
+    },
+
+    async refreshSeerFilterStatuses() {
+      if (
+        this.seerStatusFilter === 'all'
+        || this.viewMode === 'archived'
+        || this.viewMode === 'ai-requests'
+      ) {
+        this.filterIntegrationLoading = false;
+        this.reinitObserverAfterFilter();
+        return;
+      }
+
+      const requests = this.loadedRequestsForFilters();
+      if (!requests.length) {
+        this.filterIntegrationLoading = false;
+        this.reinitObserverAfterFilter();
+        return;
+      }
+
+      const token = ++this.filterIntegrationToken;
+      this.filterIntegrationLoading = true;
+      try {
+        await this.prefetchRequestIntegrationStatusesAsync(requests, {
+          forceTrakt: false,
+          forceSeer: true,
+        });
+      } catch (error) {
+        console.warn('Could not refresh statuses for Seer filter:', error);
+      } finally {
+        if (token === this.filterIntegrationToken) {
+          this.filterIntegrationLoading = false;
+          this.reinitObserverAfterFilter();
+        }
+      }
     },
 
     getSourceVisual(source) {

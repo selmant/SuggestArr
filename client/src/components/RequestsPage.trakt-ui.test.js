@@ -50,7 +50,9 @@ test('all requests view prefetches Trakt statuses after loading flat requests', 
   assert.match(requestsPageSource, /await this\.loadTraktDefaults\(\)/);
   assert.match(requestsPageSource, /forceSeer = true/);
   assert.match(requestsPageSource, /silent: true/);
-  assert.match(requestsPageSource, /showInitialLoader/);
+  assert.match(requestsPageSource, /showPageLoader/);
+  assert.match(requestsPageSource, /refreshSeerFilterStatuses/);
+  assert.match(requestsPageSource, /Applying Seer filter/);
   assert.match(requestsPageSource, /load-more-trigger--idle/);
   assert.match(requestsPageSource, /loadTraktStatusForSource\(source, \{ force: true \}\)/);
   assert.match(requestsPageSource, /loadTraktStatusFor\(request, \{ force: true \}\)/);
