@@ -45,7 +45,7 @@ test('request details modal renders Trakt actions for selected and related reque
 test('all requests view prefetches Trakt statuses after loading flat requests', () => {
   assert.match(
     requestsPageSource,
-    /prefetchRequestIntegrationStatusesAsync\(mapped\)/,
+    /void this\.prefetchRequestIntegrationStatusesAsync\(mapped\)/,
   );
   assert.match(requestsPageSource, /loadTraktStatusForSource\(source, \{ force: true \}\)/);
   assert.match(requestsPageSource, /loadTraktStatusFor\(request, \{ force: true \}\)/);

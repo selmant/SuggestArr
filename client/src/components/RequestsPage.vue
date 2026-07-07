@@ -844,7 +844,7 @@ export default {
       if (source.has_more_requests && !source.requestsFullyLoaded) {
         await this.loadAllSourceRequests(source);
       }
-      await this.prefetchRequestIntegrationStatusesAsync(source.requests || []);
+      void this.prefetchRequestIntegrationStatusesAsync(source.requests || []);
     },
 
     async loadAllSourceRequests(source) {
@@ -875,7 +875,7 @@ export default {
         }
         source.requestsFullyLoaded = true;
         source.has_more_requests = false;
-        await this.prefetchRequestIntegrationStatusesAsync(source.requests || []);
+        void this.prefetchRequestIntegrationStatusesAsync(source.requests || []);
       } catch (error) {
         console.error('Failed to load remaining source requests:', error);
         this.$toast.open({
@@ -969,7 +969,7 @@ export default {
         this.aiRequestsPage = page;
         this.aiRequestsTotalPages = total_pages;
         if (data?.length) {
-          await this.prefetchRequestIntegrationStatusesAsync(data);
+          void this.prefetchRequestIntegrationStatusesAsync(data);
         }
         this.$nextTick(() => {
           setTimeout(() => this.initAiObserver(), 150);
@@ -1091,7 +1091,7 @@ export default {
         } else {
           this.flatRequests = [...this.flatRequests, ...mapped];
         }
-        await this.prefetchRequestIntegrationStatusesAsync(mapped);
+        void this.prefetchRequestIntegrationStatusesAsync(mapped);
 
         this.flatCurrentPage = page;
         this.flatTotalPages = totalPages;
@@ -1165,7 +1165,7 @@ export default {
 
         const nestedRequests = newSources.flatMap((source) => source.requests || []);
         if (nestedRequests.length) {
-          await this.prefetchRequestIntegrationStatusesAsync(nestedRequests);
+          void this.prefetchRequestIntegrationStatusesAsync(nestedRequests);
         }
 
         this.$nextTick(() => {
@@ -1197,10 +1197,17 @@ export default {
     },
 
     async prefetchRequestIntegrationStatusesAsync(requests, { forceTrakt = true } = {}) {
-      await Promise.all([
-        this.prefetchPosterTraktStatusesAsync(requests, { force: forceTrakt }),
-        this.prefetchPosterSeerStatusesAsync(requests),
-      ]);
+      if (!requests?.length) {
+        return;
+      }
+      try {
+        await Promise.all([
+          this.prefetchPosterTraktStatusesAsync(requests, { force: forceTrakt }),
+          this.prefetchPosterSeerStatusesAsync(requests),
+        ]);
+      } catch (error) {
+        console.warn('Could not prefetch request integration statuses:', error);
+      }
     },
 
     syncListedRequestSeerStatus(item, status) {

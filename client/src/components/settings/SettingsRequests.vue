@@ -212,7 +212,11 @@ export default {
         });
 
         this.recentRequests = allRequests.slice(0, 20);
-        await this.prefetchPosterTraktStatusesAsync(this.recentRequests, { force: true });
+        try {
+          await this.prefetchPosterTraktStatusesAsync(this.recentRequests, { force: true });
+        } catch (error) {
+          console.warn('Could not prefetch Trakt statuses for recent requests:', error);
+        }
       } catch (error) {
         console.error('Error loading recent requests:', error);
       } finally {

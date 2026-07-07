@@ -29,7 +29,8 @@ test('request details modal renders Seer actions for selected and related reques
   assert.match(requestPosterCardSource, /seer-poster-dock/);
   assert.match(requestsPageSource, /useRequestSeerActions/);
   assert.match(requestsPageSource, /posterSeerProps/);
-  assert.match(requestsPageSource, /prefetchRequestIntegrationStatusesAsync/);
+  assert.match(requestsPageSource, /void this\.prefetchRequestIntegrationStatusesAsync\(mapped\)/);
+  assert.match(requestsPageSource, /Could not prefetch request integration statuses/);
   assert.match(requestsPageSource, /refreshModalIntegrationStatuses/);
   assert.match(requestsPageSource, /loadSeerStatusForSource\(source, \{ force: true \}\)/);
   assert.match(requestsPageSource, /loadSeerStatusFor\(request, \{ force: true \}\)/);
