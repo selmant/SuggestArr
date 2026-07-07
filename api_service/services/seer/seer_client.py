@@ -9,7 +9,7 @@ from api_service.utils.tmdb_images import tmdb_image_url
 
 BATCH_SIZE = 20  # Number of requests fetched per batch
 HTTP_OK = {200, 201, 202}  # Include 202 Accepted for async operations
-PENDING_REQUEST_STATUSES = {1, "1", "pending", "PENDING"}
+from api_service.services.seer.seer_status import PENDING_REQUEST_STATUSES
 
 
 def _as_bool(value):
@@ -252,7 +252,9 @@ class SeerClient(BaseHTTPClient):
                     'id': request_data.get('id'),
                     'status': request_data.get('status'),
                     'media_status': media.get('status'),
+                    'created_at': request_data.get('createdAt'),
                     'updated_at': request_data.get('updatedAt'),
+                    'title': media.get('title') or request_data.get('title'),
                 }
                 index.setdefault(key, []).append(entry)
         self.logger.debug("Seer requests index built with %d keys", len(index))
@@ -281,6 +283,36 @@ class SeerClient(BaseHTTPClient):
             "POST", f"api/v1/request/{request_id}/decline", use_cookie=False,
         )
         return result is not None
+
+    async def delete_request(self, request_id: int) -> bool:
+        """Delete a Seer media request record by its numeric request id.
+
+        :param request_id: Seer request id.
+        :return: True when the delete call succeeds.
+        """
+        url = f"{self.api_url}/api/v1/request/{int(request_id)}"
+        headers, cookies = self._get_auth_headers(bool(self.session_token))
+        session = await self._get_session()
+        try:
+            async with session.delete(url, headers=headers, cookies=cookies, timeout=self.REQUEST_TIMEOUT) as response:
+                if response.status in (200, 202, 204):
+                    self.logger.info("Deleted Seer request %s", request_id)
+                    return True
+                body = ""
+                try:
+                    body = await response.text()
+                except Exception:
+                    pass
+                self.logger.error(
+                    "Failed to delete Seer request %s: status=%s body=%s",
+                    request_id,
+                    response.status,
+                    body[:200],
+                )
+                return False
+        except aiohttp.ClientError as exc:
+            self.logger.error("Client error deleting Seer request %s: %s", request_id, exc)
+            return False
 
     async def get_radarr_servers(self):
         """Fetch available Radarr servers from the Seer service with their profiles, root folders, and tags."""

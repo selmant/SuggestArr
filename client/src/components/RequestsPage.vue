@@ -352,7 +352,7 @@ import RequestPosterCard from '@/components/common/RequestPosterCard.vue';
 import RequestDetailsModal from '@/components/common/RequestDetailsModal.vue';
 import RatingBadges from '@/components/common/RatingBadges.vue';
 import { formatDate } from '@/utils/dateUtils.js';
-import { SEER_STATUS_FILTER_OPTIONS } from '@/utils/seerStatus.js';
+import { SEER_STATUS_FILTER_OPTIONS, matchesSeerStatusFilter } from '@/utils/seerStatus.js';
 import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
 import { getRatingBadgeSettings } from '@/utils/ratingBadgeConfig.js';
 import {
@@ -643,7 +643,7 @@ export default {
 
     requestMatchesSeerStatusFilter(request) {
       const status = this.getSeerStatus(request)?.seer_status;
-      return status === this.seerStatusFilter;
+      return matchesSeerStatusFilter(status, this.seerStatusFilter);
     },
 
     getSourceVisual(source) {

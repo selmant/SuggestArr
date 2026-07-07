@@ -3,11 +3,13 @@
 DISCOVER_SOURCE = "discover"
 TRAKT_RECOMMENDATIONS_SOURCE = "trakt_recommendations"
 TRAKT_LIST_SOURCE = "trakt_list"
+SEER_IMPORT_SOURCE = "seer_import"
 
 REQUEST_SOURCE_LABELS = {
     DISCOVER_SOURCE: "Discover",
     TRAKT_RECOMMENDATIONS_SOURCE: "Trakt Recommendations",
     TRAKT_LIST_SOURCE: "Trakt List",
+    SEER_IMPORT_SOURCE: "Seer Import",
 }
 
 

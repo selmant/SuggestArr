@@ -311,6 +311,58 @@ class DatabaseManager:
                     reason TEXT
                 )
             """,
+            'seer_request_prune_settings': """
+                CREATE TABLE IF NOT EXISTS seer_request_prune_settings (
+                    id INTEGER PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 0,
+                    dry_run INTEGER NOT NULL DEFAULT 1,
+                    sync_suggestarr INTEGER NOT NULL DEFAULT 0,
+                    declined_days INTEGER NOT NULL DEFAULT 14,
+                    failed_days INTEGER NOT NULL DEFAULT 7,
+                    completed_days INTEGER NOT NULL DEFAULT 7,
+                    deleted_days INTEGER NOT NULL DEFAULT 3,
+                    last_run_at TIMESTAMP,
+                    last_run_status TEXT,
+                    last_run_summary TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """,
+            'seer_request_prune_log': """
+                CREATE TABLE IF NOT EXISTS seer_request_prune_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ran_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    seer_request_id INTEGER,
+                    tmdb_id TEXT,
+                    media_type TEXT,
+                    title TEXT,
+                    action TEXT NOT NULL,
+                    was_dry_run INTEGER NOT NULL DEFAULT 0,
+                    reason TEXT
+                )
+            """,
+            'seer_import_settings': """
+                CREATE TABLE IF NOT EXISTS seer_import_settings (
+                    id INTEGER PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 0,
+                    dry_run INTEGER NOT NULL DEFAULT 1,
+                    last_run_at TIMESTAMP,
+                    last_run_status TEXT,
+                    last_run_summary TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """,
+            'seer_import_log': """
+                CREATE TABLE IF NOT EXISTS seer_import_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ran_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    tmdb_id TEXT,
+                    media_type TEXT,
+                    title TEXT,
+                    action TEXT NOT NULL,
+                    was_dry_run INTEGER NOT NULL DEFAULT 0,
+                    reason TEXT
+                )
+            """,
             'ai_search_seen': """
                 CREATE TABLE IF NOT EXISTS ai_search_seen (
                     tmdb_id TEXT NOT NULL,
@@ -1074,7 +1126,17 @@ class DatabaseManager:
         # Connection pooling handles connection management automatically
         pass
     
-    def save_request(self, media_type: str, media_id: str, source: str, user_id: Optional[str] = None, is_anime: bool = False, rationale: Optional[str] = None, source_origin: Optional[str] = None) -> None:
+    def save_request(
+        self,
+        media_type: str,
+        media_id: str,
+        source: str,
+        user_id: Optional[str] = None,
+        is_anime: bool = False,
+        rationale: Optional[str] = None,
+        source_origin: Optional[str] = None,
+        requested_at: Optional[str] = None,
+    ) -> None:
         """Save a new media request to the database, ignoring duplicates."""
         self.logger.debug(f"Saving request: {media_type} {media_id} from {source} (anime={is_anime}, origin={source_origin})")
 
@@ -1098,6 +1160,16 @@ class DatabaseManager:
                 query = query.replace("?", "%s")
             
             cursor.execute(query, params)
+
+            if requested_at:
+                placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+                update_query = (
+                    f"UPDATE requests SET requested_at = {placeholder} "
+                    f"WHERE tmdb_request_id = {placeholder} AND media_type = {placeholder} "
+                    f"AND tmdb_source_id = {placeholder}"
+                )
+                cursor.execute(update_query, (requested_at, str(media_id), media_type, source))
+
             conn.commit()
     
     def save_user(self, user: Dict[str, Any]) -> None:
@@ -1878,6 +1950,282 @@ class DatabaseManager:
                 'title': r[4], 'action': r[5], 'was_dry_run': bool(r[6]),
                 'user_rating': r[7], 'reason': r[8],
             } for r in rows]
+
+    def get_seer_request_prune_settings(self) -> dict:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, enabled, dry_run, sync_suggestarr, declined_days, failed_days, "
+                "completed_days, deleted_days, last_run_at, last_run_status, last_run_summary "
+                "FROM seer_request_prune_settings WHERE id = 1"
+            )
+            row = cursor.fetchone()
+            if not row:
+                placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+                cursor.execute(
+                    f"INSERT INTO seer_request_prune_settings "
+                    f"(id, enabled, dry_run, sync_suggestarr, declined_days, failed_days, completed_days, deleted_days) "
+                    f"VALUES (1, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})",
+                    (0, 1, 0, 14, 7, 7, 3),
+                )
+                conn.commit()
+                return {
+                    'enabled': False,
+                    'dry_run': True,
+                    'sync_suggestarr': False,
+                    'declined_days': 14,
+                    'failed_days': 7,
+                    'completed_days': 7,
+                    'deleted_days': 3,
+                    'last_run_at': None,
+                    'last_run_status': None,
+                    'last_run_summary': None,
+                }
+            return {
+                'enabled': bool(row[1]),
+                'dry_run': bool(row[2]),
+                'sync_suggestarr': bool(row[3]),
+                'declined_days': int(row[4]),
+                'failed_days': int(row[5]),
+                'completed_days': int(row[6]),
+                'deleted_days': int(row[7]),
+                'last_run_at': row[8],
+                'last_run_status': row[9],
+                'last_run_summary': row[10],
+            }
+
+    def update_seer_request_prune_settings(
+        self,
+        enabled=None,
+        dry_run=None,
+        sync_suggestarr=None,
+        declined_days=None,
+        failed_days=None,
+        completed_days=None,
+        deleted_days=None,
+        last_run_at=None,
+        last_run_status=None,
+        last_run_summary=None,
+    ) -> dict:
+        self.get_seer_request_prune_settings()
+        sets = []
+        params = []
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        bool_fields = {
+            'enabled': enabled,
+            'dry_run': dry_run,
+            'sync_suggestarr': sync_suggestarr,
+        }
+        int_fields = {
+            'declined_days': declined_days,
+            'failed_days': failed_days,
+            'completed_days': completed_days,
+            'deleted_days': deleted_days,
+        }
+        text_fields = {
+            'last_run_at': last_run_at,
+            'last_run_status': last_run_status,
+            'last_run_summary': last_run_summary,
+        }
+        for key, value in bool_fields.items():
+            if value is not None:
+                sets.append(f"{key} = {placeholder}")
+                params.append(1 if value else 0)
+        for key, value in int_fields.items():
+            if value is not None:
+                sets.append(f"{key} = {placeholder}")
+                params.append(int(value))
+        for key, value in text_fields.items():
+            if value is not None:
+                sets.append(f"{key} = {placeholder}")
+                params.append(value)
+        sets.append("updated_at = CURRENT_TIMESTAMP")
+        if sets:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE seer_request_prune_settings SET {', '.join(sets)} WHERE id = 1",
+                    params,
+                )
+                conn.commit()
+        return self.get_seer_request_prune_settings()
+
+    def add_seer_request_prune_log(
+        self,
+        *,
+        seer_request_id,
+        tmdb_id,
+        media_type,
+        title,
+        action,
+        was_dry_run,
+        reason=None,
+    ) -> None:
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"INSERT INTO seer_request_prune_log "
+                f"(seer_request_id, tmdb_id, media_type, title, action, was_dry_run, reason) "
+                f"VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})",
+                (
+                    int(seer_request_id) if seer_request_id is not None else None,
+                    str(tmdb_id) if tmdb_id is not None else None,
+                    media_type,
+                    title,
+                    action,
+                    1 if was_dry_run else 0,
+                    reason,
+                ),
+            )
+            conn.commit()
+
+    def get_seer_request_prune_log(self, limit: int = 100) -> list:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, ran_at, seer_request_id, tmdb_id, media_type, title, action, was_dry_run, reason "
+                "FROM seer_request_prune_log ORDER BY id DESC LIMIT ?".replace(
+                    '?', '%s' if self.db_type in ('mysql', 'postgres') else '?'
+                ),
+                (int(limit),),
+            )
+            rows = cursor.fetchall()
+            return [{
+                'id': r[0],
+                'ran_at': r[1],
+                'seer_request_id': r[2],
+                'tmdb_id': r[3],
+                'media_type': r[4],
+                'title': r[5],
+                'action': r[6],
+                'was_dry_run': bool(r[7]),
+                'reason': r[8],
+            } for r in rows]
+
+    def get_seer_import_settings(self) -> dict:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, enabled, dry_run, last_run_at, last_run_status, last_run_summary "
+                "FROM seer_import_settings WHERE id = 1"
+            )
+            row = cursor.fetchone()
+            if not row:
+                placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+                cursor.execute(
+                    f"INSERT INTO seer_import_settings (id, enabled, dry_run) VALUES (1, {placeholder}, {placeholder})",
+                    (0, 1),
+                )
+                conn.commit()
+                return {
+                    'enabled': False,
+                    'dry_run': True,
+                    'last_run_at': None,
+                    'last_run_status': None,
+                    'last_run_summary': None,
+                }
+            return {
+                'enabled': bool(row[1]),
+                'dry_run': bool(row[2]),
+                'last_run_at': row[3],
+                'last_run_status': row[4],
+                'last_run_summary': row[5],
+            }
+
+    def update_seer_import_settings(
+        self,
+        enabled=None,
+        dry_run=None,
+        last_run_at=None,
+        last_run_status=None,
+        last_run_summary=None,
+    ) -> dict:
+        self.get_seer_import_settings()
+        sets = []
+        params = []
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        if enabled is not None:
+            sets.append(f"enabled = {placeholder}")
+            params.append(1 if enabled else 0)
+        if dry_run is not None:
+            sets.append(f"dry_run = {placeholder}")
+            params.append(1 if dry_run else 0)
+        if last_run_at is not None:
+            sets.append(f"last_run_at = {placeholder}")
+            params.append(last_run_at)
+        if last_run_status is not None:
+            sets.append(f"last_run_status = {placeholder}")
+            params.append(last_run_status)
+        if last_run_summary is not None:
+            sets.append(f"last_run_summary = {placeholder}")
+            params.append(last_run_summary)
+        sets.append("updated_at = CURRENT_TIMESTAMP")
+        if sets:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE seer_import_settings SET {', '.join(sets)} WHERE id = 1",
+                    params,
+                )
+                conn.commit()
+        return self.get_seer_import_settings()
+
+    def add_seer_import_log(
+        self,
+        *,
+        tmdb_id,
+        media_type,
+        title,
+        action,
+        was_dry_run,
+        reason=None,
+    ) -> None:
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"INSERT INTO seer_import_log (tmdb_id, media_type, title, action, was_dry_run, reason) "
+                f"VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})",
+                (
+                    str(tmdb_id) if tmdb_id is not None else None,
+                    media_type,
+                    title,
+                    action,
+                    1 if was_dry_run else 0,
+                    reason,
+                ),
+            )
+            conn.commit()
+
+    def get_seer_import_log(self, limit: int = 100) -> list:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, ran_at, tmdb_id, media_type, title, action, was_dry_run, reason "
+                "FROM seer_import_log ORDER BY id DESC LIMIT ?".replace(
+                    '?', '%s' if self.db_type in ('mysql', 'postgres') else '?'
+                ),
+                (int(limit),),
+            )
+            rows = cursor.fetchall()
+            return [{
+                'id': r[0],
+                'ran_at': r[1],
+                'tmdb_id': r[2],
+                'media_type': r[3],
+                'title': r[4],
+                'action': r[5],
+                'was_dry_run': bool(r[6]),
+                'reason': r[7],
+            } for r in rows]
+
+    def get_existing_request_keys(self) -> set:
+        """Return ``(media_type, tmdb_id)`` keys for all stored requests."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT media_type, tmdb_request_id FROM requests")
+            return {(str(row[0]), str(row[1])) for row in cursor.fetchall()}
 
     def get_suggestarr_requests_older_than(self, cutoff_iso: str) -> list:
         """Return SuggestArr-originated requests requested before cutoff."""

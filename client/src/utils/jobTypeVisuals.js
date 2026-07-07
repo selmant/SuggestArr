@@ -25,6 +25,12 @@ export const JOB_TYPE_CONFIG = {
     color: 'var(--color-info-light, var(--color-primary-light))',
     gradient: 'linear-gradient(135deg, var(--color-info-hover) 0%, var(--color-primary) 50%, var(--color-primary-light) 100%)',
   },
+  seer_import: {
+    icon: 'fas fa-cloud-download-alt',
+    label: 'Seer Import',
+    color: 'var(--color-success-light, #2ecc71)',
+    gradient: 'linear-gradient(135deg, #1f8f4d 0%, #2ecc71 50%, #7bed9f 100%)',
+  },
   llm_recommendation: {
     icon: 'fas fa-robot',
     label: 'LLM Recommendation',
@@ -84,6 +90,9 @@ export function getRequestSourceVisual(source) {
   }
   if (id === 'trakt_list') {
     return { ...JOB_TYPE_CONFIG.trakt_list, key: 'trakt_list' };
+  }
+  if (id === 'seer_import') {
+    return { ...JOB_TYPE_CONFIG.seer_import, key: 'seer_import' };
   }
   if (id === '0') {
     return { ...JOB_TYPE_CONFIG.llm_recommendation, key: 'llm_recommendation' };

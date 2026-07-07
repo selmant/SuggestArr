@@ -5,7 +5,8 @@ from typing import Any, Optional
 
 from api_service.config.config import load_env_vars
 from api_service.db.database_manager import DatabaseManager
-from api_service.services.seer.seer_client import PENDING_REQUEST_STATUSES, SeerClient
+from api_service.services.seer.seer_client import SeerClient
+from api_service.services.seer.seer_status import derive_seer_status, is_pending_status
 
 _VALID_MEDIA_TYPES = {"movie", "tv"}
 _INDEX_CACHE_TTL_SECONDS = 5.0
@@ -82,30 +83,10 @@ async def _get_requests_index(client: SeerClient, *, force: bool = False) -> dic
     return index
 
 
-def _is_pending_status(status: Any) -> bool:
-    return status in PENDING_REQUEST_STATUSES
-
-
-def _derive_seer_status(request_status: Any, media_status: Any) -> str:
-    if _is_pending_status(request_status):
-        return "pending"
-    if request_status in {3, "3", "declined", "DECLINED"}:
-        return "declined"
-    if media_status in {5, "5", "available", "AVAILABLE"}:
-        return "available"
-    if media_status in {4, "4", "partially_available", "PARTIALLY_AVAILABLE"}:
-        return "partially_available"
-    if media_status in {3, "3", "processing", "PROCESSING"}:
-        return "processing"
-    if request_status in {2, "2", "approved", "APPROVED"}:
-        return "approved"
-    return "not_found"
-
-
 def _pick_primary_entry(entries: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
     if not entries:
         return None
-    pending = [entry for entry in entries if _is_pending_status(entry.get("status"))]
+    pending = [entry for entry in entries if is_pending_status(entry.get("status"))]
     if pending:
         return pending[-1]
     return entries[-1]
@@ -129,9 +110,9 @@ def _status_payload(
     pending_ids = [
         int(entry["id"])
         for entry in entries
-        if entry.get("id") is not None and _is_pending_status(entry.get("status"))
+        if entry.get("id") is not None and is_pending_status(entry.get("status"))
     ]
-    seer_status = _derive_seer_status(primary.get("status"), primary.get("media_status"))
+    seer_status = derive_seer_status(primary.get("status"), primary.get("media_status"))
     return {
         "tmdb_id": str(tmdb_id),
         "media_type": media_type,
@@ -223,7 +204,7 @@ async def _apply_action(
         pending_ids = [
             int(entry["id"])
             for entry in entries
-            if entry.get("id") is not None and _is_pending_status(entry.get("status"))
+            if entry.get("id") is not None and is_pending_status(entry.get("status"))
         ]
         if not pending_ids:
             return _status_payload(tmdb_id, media_type, entries)

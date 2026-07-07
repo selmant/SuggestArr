@@ -7,6 +7,7 @@ test('getRequestSourceVisual resolves synthetic source ids', () => {
   assert.equal(getRequestSourceVisual({ id: 'discover' })?.key, 'discover');
   assert.equal(getRequestSourceVisual({ id: 'trakt_recommendations' })?.key, 'trakt_recommendations');
   assert.equal(getRequestSourceVisual({ id: 'trakt_list' })?.key, 'trakt_list');
+  assert.equal(getRequestSourceVisual({ id: 'seer_import' })?.key, 'seer_import');
   assert.equal(getRequestSourceVisual({ id: '0' })?.key, 'llm_recommendation');
 });
 

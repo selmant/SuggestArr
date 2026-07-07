@@ -238,6 +238,14 @@ export const getCleanupSettings = () => axios.get('/api/cleanup/settings');
 export const setCleanupSettings = (payload) => axios.post('/api/cleanup/settings', payload);
 export const runCleanupNow = (dryRun = null) => axios.post('/api/cleanup/run', dryRun === null ? {} : { dry_run: dryRun });
 export const getCleanupLog = (limit = 100) => axios.get('/api/cleanup/log', { params: { limit } });
+export const getSeerPruneSettings = () => axios.get('/api/cleanup/seer-prune/settings');
+export const setSeerPruneSettings = (payload) => axios.post('/api/cleanup/seer-prune/settings', payload);
+export const runSeerPruneNow = (dryRun = null) => axios.post('/api/cleanup/seer-prune/run', dryRun === null ? {} : { dry_run: dryRun });
+export const getSeerPruneLog = (limit = 100) => axios.get('/api/cleanup/seer-prune/log', { params: { limit } });
+export const getSeerImportSettings = () => axios.get('/api/cleanup/seer-import/settings');
+export const setSeerImportSettings = (payload) => axios.post('/api/cleanup/seer-import/settings', payload);
+export const runSeerImportNow = (dryRun = null) => axios.post('/api/cleanup/seer-import/run', dryRun === null ? {} : { dry_run: dryRun });
+export const getSeerImportLog = (limit = 100) => axios.get('/api/cleanup/seer-import/log', { params: { limit } });
 
 // Config export: download a configuration snapshot (admin only)
 export const exportConfig = (includeSecrets = false) => {

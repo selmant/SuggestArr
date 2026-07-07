@@ -239,9 +239,11 @@ async def test_decline_request_raises_when_seer_call_fails():
 
 
 def test_derive_seer_status_maps_media_states():
-    assert request_actions._derive_seer_status(1, 2) == "pending"
-    assert request_actions._derive_seer_status(3, 2) == "declined"
-    assert request_actions._derive_seer_status(2, 5) == "available"
-    assert request_actions._derive_seer_status(2, 4) == "partially_available"
-    assert request_actions._derive_seer_status(2, 3) == "processing"
-    assert request_actions._derive_seer_status(2, 2) == "approved"
+    from api_service.services.seer import seer_status
+
+    assert seer_status.derive_seer_status(1, 2) == "pending"
+    assert seer_status.derive_seer_status(3, 2) == "declined"
+    assert seer_status.derive_seer_status(2, 5) == "available"
+    assert seer_status.derive_seer_status(2, 4) == "partially_available"
+    assert seer_status.derive_seer_status(2, 3) == "processing"
+    assert seer_status.derive_seer_status(2, 2) == "unavailable"

@@ -19,6 +19,11 @@ const METHOD_METADATA = {
     shortLabel: 'Trakt List',
     icon: 'icon-trakt',
   },
+  seer_import: {
+    label: 'Seer Import',
+    shortLabel: 'Seer',
+    icon: 'fas fa-cloud-download-alt',
+  },
 };
 
 const SYNTHETIC_SOURCE_IDS = new Set(Object.keys(METHOD_METADATA));
