@@ -18,7 +18,7 @@ test('request details modal renders Trakt actions for selected and related reque
   assert.match(traktActionsSource, /listTraktMediaUsers/);
   assert.match(traktActionsSource, /starsFromTraktStatus/);
 
-  assert.match(detailsModalSource, /v-if="traktModalTarget" class="trakt-action-strip trakt-action-strip--modal"/);
+  assert.match(detailsModalSource, /v-if="traktModalTarget" class="[^"]*trakt-action-strip trakt-action-strip--modal/);
   assert.match(detailsModalSource, /v-if="canShowRelatedTrakt\(request\)" class="trakt-inline-actions"/);
   assert.match(detailsModalSource, /data-testid="trakt-action-strip"/);
   assert.match(detailsModalSource, /data-testid="trakt-mark-watched"/);
@@ -32,10 +32,8 @@ test('request details modal renders Trakt actions for selected and related reque
   assert.match(requestPosterCardSource, /trakt-poster-dock/);
   assert.match(requestPosterCardSource, /mediaTypeLabel/);
   assert.doesNotMatch(requestPosterCardSource, /item\.media_type\.charAt\(0\)\.toUpperCase\(\)/);
-  assert.match(detailsModalSource, /request-details-modal__context-row--trakt/);
-  assert.match(detailsModalSource, /Media type <strong>/);
   assert.match(detailsModalSource, /RatingBadges/);
-  assert.match(detailsModalSource, /Trakt status <strong>/);
+  assert.match(detailsModalSource, /trakt-action-state/);
   assert.match(detailsModalSource, /traktStatusLabel/);
   assert.match(traktRequestActionsCss, /\.trakt-action-strip--modal/);
   assert.match(traktRequestActionsCss, /\.trakt-action-summary/);

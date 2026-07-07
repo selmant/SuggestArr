@@ -6,11 +6,11 @@ import os
 from flask import Flask, jsonify
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
-from asgiref.wsgi import WsgiToAsgi
 import logging
 import atexit
 
 from api_service.utils.utils import AppUtils
+from api_service.utils.asgi_wsgi import ThreadedWsgiToAsgi
 from api_service.config.logger_manager import LoggerManager
 from api_service.config.config import load_env_vars
 
@@ -200,7 +200,7 @@ def create_app():
 
 app = create_app()
 app.wsgi_app = SubpathMiddleware(app.wsgi_app)
-asgi_app = WsgiToAsgi(app)
+asgi_app = ThreadedWsgiToAsgi(app)
 # Initialize database and jobs scheduler
 try:
     from api_service.db.database_manager import DatabaseManager

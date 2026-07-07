@@ -244,8 +244,6 @@
                 source-mode="ai"
                 placeholder-icon="fas fa-magic"
                 :show-missing-rating="false"
-                lazy-status
-                @visible="onRequestCardVisible"
                 @select="openModal($event, true)" />
             </transition-group>
             <div v-if="aiRequestsHasMore" ref="loadMoreTriggerAi" class="load-more-trigger">
@@ -266,9 +264,7 @@
                 :item="request"
                 :badge-settings="ratingBadgeSettings"
                 :trakt-user-rating="getTraktStatus(request)?.rating"
-                lazy-status
                 v-bind="{ ...posterTraktProps(request), ...posterSeerProps(request) }"
-                @visible="onRequestCardVisible"
                 @set-trakt-watched="setTraktWatchedFor(request, $event)"
                 @rate-trakt="rateRequestOnTraktFor(request, $event)"
                 @approve-seer="approveFor(request)"
@@ -719,11 +715,6 @@ export default {
       this.currentPage = 0;
       this.totalPages = 1;
       this.fetchRequests(1);
-    },
-
-    onRequestCardVisible(item) {
-      this.queuePosterTraktStatus(item);
-      this.queuePosterSeerStatus(item);
     },
 
     async toggleSourceRequests(source) {
