@@ -67,6 +67,20 @@ async def test_request_device_code_posts_client_id():
 
 
 @pytest.mark.asyncio
+async def test_request_rejects_long_trakt_retry_after(monkeypatch):
+    monkeypatch.setenv("TRAKT_RETRY_AFTER_MAX_SECONDS", "5")
+    session = FakeSession([
+        FakeResponse(429, {"error": "rate limited"}, headers={"Retry-After": "60"}),
+    ])
+    client = TraktClient("cid", "secret", "access", "refresh", expires_at=int(time.time()) + 3600, session=session)
+
+    with pytest.raises(RuntimeError, match="rate limited"):
+        await client.get_user_settings()
+
+    assert len(session.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_poll_for_token_updates_instance_without_db_persist_when_no_link_id():
     session = FakeSession([
         FakeResponse(200, {

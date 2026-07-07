@@ -155,7 +155,7 @@ async def fresh_item_status(
 ) -> dict[str, Any]:
     """Bypass cached sync lists and resolve the current Trakt state for one item."""
     invalidate_user_sync_cache(user_id)
-    return await get_cached_item_status(client, user_id, media_type, str(tmdb_id))
+    return await client.get_item_sync_status(media_type, str(tmdb_id))
 
 
 async def mark_request_watched(
@@ -174,10 +174,11 @@ async def mark_request_watched(
             await client.add_to_history(media_type, str(tmdb_id), _watched_at_value(watched_at))
         if rating is not None:
             await client.add_rating(media_type, str(tmdb_id), rating)
-        final = await fresh_item_status(client, user_id, media_type, str(tmdb_id))
-        if rating is not None and final.get("rating") is None:
-            final["rating"] = rating
-        final["watched"] = True
+        invalidate_user_sync_cache(user_id)
+        final = {
+            "watched": True,
+            "rating": rating if rating is not None else current.get("rating"),
+        }
     return _status_payload(
         tmdb_id,
         media_type,
@@ -202,9 +203,8 @@ async def set_request_rating(
         raise ValueError("rating_stars is required")
     async with _create_client(db, user_id) as client:
         await client.add_rating(media_type, str(tmdb_id), rating)
-        final = await fresh_item_status(client, user_id, media_type, str(tmdb_id))
-        if final.get("rating") is None:
-            final["rating"] = rating
+        invalidate_user_sync_cache(user_id)
+        final = {"rating": rating}
     return _status_payload(
         tmdb_id,
         media_type,
@@ -230,10 +230,11 @@ async def unmark_request_watched(
             await client.remove_from_history(media_type, str(tmdb_id))
         if remove_rating and current.get("rating") is not None:
             await client.remove_rating(media_type, str(tmdb_id))
-        final = await fresh_item_status(client, user_id, media_type, str(tmdb_id))
-        if remove_rating:
-            final["rating"] = None
-        final["watched"] = False
+        invalidate_user_sync_cache(user_id)
+        final = {
+            "watched": False,
+            "rating": None if remove_rating else current.get("rating"),
+        }
     return _status_payload(
         tmdb_id,
         media_type,

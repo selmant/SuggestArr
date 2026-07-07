@@ -1,4 +1,5 @@
 import asyncio
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from api_service.db.database_manager import DatabaseManager
 from api_service.services.http.base_client import BaseHTTPClient
 
 TRAKT_RECOMMENDATIONS_LIMIT_MAX = 250
+TRAKT_RETRY_AFTER_MAX_SECONDS = 5
 
 
 class TraktDeviceFlowError(RuntimeError):
@@ -581,6 +583,11 @@ class TraktClient(BaseHTTPClient):
                 if response.status == 429 and retry_rate_limit:
                     retry_after = self._parse_retry_after(response.headers.get("Retry-After"))
                     if retry_after > 0:
+                        max_retry_after = self._max_retry_after_seconds()
+                        if retry_after > max_retry_after:
+                            raise RuntimeError(
+                                f"Trakt API rate limited {method} {url}; retry after {retry_after}s"
+                            )
                         await asyncio.sleep(retry_after)
                     return await self._request(
                         method,
@@ -606,8 +613,16 @@ class TraktClient(BaseHTTPClient):
 
                 body = await response.text()
                 raise RuntimeError(f"Trakt API request failed: {method} {url} returned {response.status}: {body}")
-        except aiohttp.ClientError as exc:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             raise RuntimeError(f"Trakt API request failed: {method} {url}: {exc}") from exc
+
+    @staticmethod
+    def _max_retry_after_seconds() -> int:
+        raw = os.getenv("TRAKT_RETRY_AFTER_MAX_SECONDS", str(TRAKT_RETRY_AFTER_MAX_SECONDS))
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            return TRAKT_RETRY_AFTER_MAX_SECONDS
 
     async def _refresh_if_needed(self) -> None:
         if not self.refresh_token or not self.expires_at:

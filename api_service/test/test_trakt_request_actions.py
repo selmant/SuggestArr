@@ -79,7 +79,6 @@ async def test_mark_request_watched_resolves_request_user_and_posts_history():
             }):
         fresh_status.side_effect = [
             {"watched": False, "rating": None},
-            {"watched": True, "rating": 9},
         ]
         result = await request_actions.mark_request_watched(
             db, "550", "movie", "jf-1", watched_at="now", rating_stars=4.5,
@@ -87,6 +86,7 @@ async def test_mark_request_watched_resolves_request_user_and_posts_history():
 
     assert result["watched"] is True
     assert result["rating"] == 9
+    fresh_status.assert_awaited_once()
     db.get_media_user_identity.assert_called_once_with("jellyfin", "jf-1")
     client = FakeTraktClient.instances[0]
     client.add_to_history.assert_awaited_once()
@@ -108,7 +108,6 @@ async def test_mark_request_watched_is_idempotent_when_already_watched():
             }):
         fresh_status.side_effect = [
             {"watched": True, "rating": 8},
-            {"watched": True, "rating": 8},
         ]
         result = await request_actions.mark_request_watched(db, "550", "movie", "jf-1")
 
@@ -121,6 +120,7 @@ async def test_mark_request_watched_is_idempotent_when_already_watched():
         "rating_stars": 4.0,
     }
     client = FakeTraktClient.instances[0]
+    fresh_status.assert_awaited_once()
     client.add_to_history.assert_not_awaited()
     client.add_rating.assert_not_awaited()
 
@@ -139,13 +139,13 @@ async def test_unmark_request_watched_is_idempotent_when_already_unwatched():
             }):
         fresh_status.side_effect = [
             {"watched": False, "rating": 6},
-            {"watched": False, "rating": 6},
         ]
         result = await request_actions.unmark_request_watched(db, "550", "movie", "jf-1")
 
     assert result["watched"] is False
     assert result["rating"] == 6
     client = FakeTraktClient.instances[0]
+    fresh_status.assert_awaited_once()
     client.remove_from_history.assert_not_awaited()
 
 
