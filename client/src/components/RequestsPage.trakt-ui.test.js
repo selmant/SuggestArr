@@ -41,3 +41,10 @@ test('request details modal renders Trakt actions for selected and related reque
   assert.match(requestsPageSource, /useRequestTraktActions/);
   assert.match(requestsPageSource, /posterTraktProps/);
 });
+
+test('all requests view prefetches Trakt statuses after loading flat requests', () => {
+  assert.match(
+    requestsPageSource,
+    /this\.prefetchPosterTraktStatuses\(mapped\);/,
+  );
+});
