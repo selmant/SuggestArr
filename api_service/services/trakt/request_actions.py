@@ -169,7 +169,7 @@ async def mark_request_watched(
     media_type = _normalize_media_type(media_type)
     rating = _rating_stars_to_trakt(rating_stars)
     async with _create_client(db, user_id) as client:
-        current = await fresh_item_status(client, user_id, media_type, str(tmdb_id))
+        current = await get_cached_item_status(client, user_id, media_type, str(tmdb_id))
         if not current.get("watched"):
             await client.add_to_history(media_type, str(tmdb_id), _watched_at_value(watched_at))
         if rating is not None:
@@ -202,9 +202,13 @@ async def set_request_rating(
     if rating is None:
         raise ValueError("rating_stars is required")
     async with _create_client(db, user_id) as client:
+        current = await get_cached_item_status(client, user_id, media_type, str(tmdb_id))
         await client.add_rating(media_type, str(tmdb_id), rating)
         invalidate_user_sync_cache(user_id)
-        final = {"rating": rating}
+        final = {
+            "watched": current.get("watched"),
+            "rating": rating,
+        }
     return _status_payload(
         tmdb_id,
         media_type,
@@ -225,7 +229,7 @@ async def unmark_request_watched(
 ) -> dict[str, Any]:
     media_type = _normalize_media_type(media_type)
     async with _create_client(db, user_id) as client:
-        current = await fresh_item_status(client, user_id, media_type, str(tmdb_id))
+        current = await get_cached_item_status(client, user_id, media_type, str(tmdb_id))
         if current.get("watched"):
             await client.remove_from_history(media_type, str(tmdb_id))
         if remove_rating and current.get("rating") is not None:
