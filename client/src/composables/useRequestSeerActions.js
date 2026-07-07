@@ -40,6 +40,7 @@ export function useRequestSeerActions() {
   const SILENT_STATUS_FLUSH_MS = 120;
   let silentStatusFlushTimer = null;
   let pendingSilentStatuses = {};
+  let pendingSilentStatusHandlers = [];
   let posterSilentPrefetchDepth = 0;
 
   function setModalTargetResolver(resolver) {
@@ -270,6 +271,7 @@ export function useRequestSeerActions() {
   function flushSilentSeerStatusUpdates() {
     silentStatusFlushTimer = null;
     if (!Object.keys(pendingSilentStatuses).length) {
+      pendingSilentStatusHandlers = [];
       return;
     }
 
@@ -278,6 +280,13 @@ export function useRequestSeerActions() {
       ...pendingSilentStatuses,
     };
     pendingSilentStatuses = {};
+
+    if (seerStatusChangeHandler) {
+      for (const [item, status] of pendingSilentStatusHandlers) {
+        seerStatusChangeHandler(item, status);
+      }
+    }
+    pendingSilentStatusHandlers = [];
   }
 
   function flushSilentSeerStatusUpdatesNow() {
@@ -323,8 +332,10 @@ export function useRequestSeerActions() {
         if (item?.request_id) {
           rememberSeerStatus(item, status);
         }
-        if (seerStatusChangeHandler) {
+        if (seerStatusChangeHandler && !silent) {
           seerStatusChangeHandler(item, status);
+        } else if (seerStatusChangeHandler && silent) {
+          pendingSilentStatusHandlers.push([item, status]);
         }
         if (modalTarget?.request_id === item.request_id) {
           applySeerStatus(status, { merge: false });
@@ -360,9 +371,9 @@ export function useRequestSeerActions() {
     }
   }
 
-  function prefetchPosterSeerStatuses(requests) {
+  function prefetchPosterSeerStatuses(requests, { force = false } = {}) {
     for (const item of (requests || [])) {
-      queuePosterSeerStatus(item);
+      queuePosterSeerStatus(item, { force });
     }
   }
 
@@ -404,12 +415,20 @@ export function useRequestSeerActions() {
     }
   }
 
-  function queuePosterSeerStatus(item) {
-    if (!canShowRelatedSeer(item) || hasFreshSeerStatus(item)) {
-      const cached = getCachedSeerStatus(statusCacheKeyFor(item));
-      if (cached) {
-        applySeerStatusFor(item, cached, { merge: false });
+  function queuePosterSeerStatus(item, { force = false } = {}) {
+    if (force) {
+      invalidateSeerStatusCacheForItem(item.request_id, item.media_type);
+    }
+    if (!force && (!canShowRelatedSeer(item) || hasFreshSeerStatus(item))) {
+      if (!posterPrefetchSilent) {
+        const cached = getCachedSeerStatus(statusCacheKeyFor(item));
+        if (cached) {
+          applySeerStatusFor(item, cached, { merge: false });
+        }
       }
+      return;
+    }
+    if (!canShowRelatedSeer(item)) {
       return;
     }
     queuedPosterItems.set(seerRequestKey(item), item);
@@ -429,14 +448,14 @@ export function useRequestSeerActions() {
     }
   }
 
-  async function prefetchPosterSeerStatusesAsync(requests, { silent = false } = {}) {
+  async function prefetchPosterSeerStatusesAsync(requests, { silent = false, force = false } = {}) {
     posterPrefetchSilent = silent;
     if (silent) {
       posterSilentPrefetchDepth += 1;
     }
     try {
       for (const item of (requests || [])) {
-        queuePosterSeerStatus(item);
+        queuePosterSeerStatus(item, { force });
       }
       await drainPosterSeerQueue({ silent });
       if (silent) {

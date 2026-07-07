@@ -146,7 +146,6 @@
         </div>
 
         <template v-else>
-        <transition name="fade-slide" mode="out-in">
           <div v-if="viewMode === 'by-content'" key="by-content">
             <transition-group 
               name="fade-slide" 
@@ -334,7 +333,7 @@
               </tbody>
             </table>
           </div>
-        </transition>
+
         <div
           v-if="hasMoreData && viewMode !== 'ai-requests' && viewMode !== 'archived'"
           :ref="viewMode === 'by-content' ? 'loadMoreTrigger' : 'loadMoreTriggerRequests'"
@@ -1116,10 +1115,11 @@ export default {
         if (page === 1) {
           this.flatRequests = mapped;
           this.totalRequestsCount = total;
+          await this.prefetchRequestIntegrationStatusesAsync(mapped);
         } else {
           this.flatRequests = [...this.flatRequests, ...mapped];
+          void this.prefetchRequestIntegrationStatusesAsync(mapped);
         }
-        void this.prefetchRequestIntegrationStatusesAsync(mapped);
 
         this.flatCurrentPage = page;
         this.flatTotalPages = totalPages;
@@ -1196,7 +1196,11 @@ export default {
 
         const nestedRequests = newSources.flatMap((source) => source.requests || []);
         if (nestedRequests.length) {
-          void this.prefetchRequestIntegrationStatusesAsync(nestedRequests);
+          if (page === 1) {
+            await this.prefetchRequestIntegrationStatusesAsync(nestedRequests);
+          } else {
+            void this.prefetchRequestIntegrationStatusesAsync(nestedRequests);
+          }
         }
 
         this.$nextTick(() => {
@@ -1230,7 +1234,7 @@ export default {
       this.prefetchPosterSeerStatuses(requests);
     },
 
-    async prefetchRequestIntegrationStatusesAsync(requests, { forceTrakt = true } = {}) {
+    async prefetchRequestIntegrationStatusesAsync(requests, { forceTrakt = true, forceSeer = true } = {}) {
       if (!requests?.length) {
         return;
       }
@@ -1238,7 +1242,7 @@ export default {
         await this.loadTraktDefaults();
         await Promise.all([
           this.prefetchPosterTraktStatusesAsync(requests, { force: forceTrakt, silent: true }),
-          this.prefetchPosterSeerStatusesAsync(requests, { silent: true }),
+          this.prefetchPosterSeerStatusesAsync(requests, { force: forceSeer, silent: true }),
         ]);
       } catch (error) {
         console.warn('Could not prefetch request integration statuses:', error);
@@ -1310,15 +1314,13 @@ export default {
       this.viewMode = 'archived';
     }
 
-    this.$nextTick(() => {
+    this.$nextTick(async () => {
       if (this.config.ENABLE_STATIC_BACKGROUND) {
         // do not start rotation
       } else {
         this.startBackgroundImageRotation();
       }
-    });
 
-    setTimeout(async () => {
       await this.loadTraktDefaults();
       this.setTraktModalTargetResolver(() => this.getTraktModalTarget(this.selectedSource));
       this.setSeerModalTargetResolver(() => this.getSeerModalTarget(this.selectedSource));
@@ -1326,17 +1328,17 @@ export default {
         this.syncListedRequestSeerStatus(item, status);
       });
       if (this.viewMode === 'archived') {
-        this.fetchArchivedRequests(1);
+        await this.fetchArchivedRequests(1);
       } else if (this.viewMode === 'all-requests') {
-        this.fetchFlatRequests(1);
+        await this.fetchFlatRequests(1);
       } else {
-        this.fetchRequests(1);
+        await this.fetchRequests(1);
       }
 
       this.$nextTick(() => {
         this.initObserver();
       });
-    }, 300);
+    });
   },
 
   beforeUnmount() {

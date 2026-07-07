@@ -541,9 +541,11 @@ export function useRequestTraktActions() {
       invalidateTraktStatusForItem(item);
     }
     if (!force && (!canShowRelatedTrakt(item) || hasFreshTraktStatus(item))) {
-      const cached = getCachedTraktStatus(statusCacheKeyFor(item));
-      if (cached) {
-        applyTraktStatusFor(item, cached, { merge: false });
+      if (!posterPrefetchSilent) {
+        const cached = getCachedTraktStatus(statusCacheKeyFor(item));
+        if (cached) {
+          applyTraktStatusFor(item, cached, { merge: false });
+        }
       }
       return;
     }
