@@ -65,6 +65,14 @@
               <span>AI Requests</span>
               <span class="view-count">{{ aiRequestsTotal }}</span>
             </button>
+            <button
+              @click="switchToArchived"
+              :class="{ active: viewMode === 'archived' }"
+              class="view-toggle-btn">
+              <i class="fas fa-archive"></i>
+              <span>Archived</span>
+              <span class="view-count">{{ archivedTotal }}</span>
+            </button>
           </div>
         </div>
 
@@ -106,6 +114,7 @@
 
               <!-- Seer Status Filter -->
               <BaseDropdown
+                v-if="viewMode !== 'archived'"
                 v-model="seerStatusFilter"
                 :options="seerStatusFilterOptions"
                 placeholder="Select Seer status"
@@ -253,7 +262,7 @@
           </div>
 
           <!-- View: All Requests -->
-          <div v-else key="all-requests">
+          <div v-else-if="viewMode === 'all-requests'" key="all-requests">
             <transition-group 
               name="fade-slide" 
               tag="div"
@@ -274,20 +283,74 @@
 
 
           </div>
+
+          <!-- View: Archived -->
+          <div v-else key="archived" class="archived-view">
+            <table class="archived-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Title</th>
+                  <th>Type</th>
+                  <th>Requested</th>
+                  <th>Archived</th>
+                  <th>Seer status</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="request in filteredArchivedRequests" :key="`${request.media_type}-${request.request_id}`">
+                  <td class="archived-poster-cell">
+                    <img
+                      v-if="request.poster_path"
+                      :src="request.poster_path"
+                      :alt="request.title"
+                      class="archived-poster" />
+                    <div v-else class="archived-poster archived-poster-placeholder">
+                      <i :class="request.media_type === 'tv' ? 'fas fa-tv' : 'fas fa-film'"></i>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="archived-title">{{ request.title || ('TMDB ' + request.request_id) }}</div>
+                    <div v-if="request.source_origin" class="archived-subtitle">{{ request.source_origin }}</div>
+                  </td>
+                  <td>{{ request.media_type === 'tv' ? 'TV' : 'Movie' }}</td>
+                  <td>{{ formatDate(request.requested_at) }}</td>
+                  <td>{{ formatDate(request.archived_at) }}</td>
+                  <td>
+                    <span class="archived-status-badge">{{ formatSeerStatusLabel(request.seer_status) }}</span>
+                  </td>
+                  <td>{{ request.archive_reason || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </transition>
         <div
-          v-if="hasMoreData && viewMode !== 'ai-requests'"
+          v-if="hasMoreData && viewMode !== 'ai-requests' && viewMode !== 'archived'"
           :ref="viewMode === 'by-content' ? 'loadMoreTrigger' : 'loadMoreTriggerRequests'"
           class="load-more-trigger">
           <div class="spinner-small"></div>
           <p>Loading more requests...</p>
         </div>
         <!-- No Results -->
-        <div v-if="viewMode !== 'ai-requests' && (viewMode === 'by-content' ? filteredAndSortedSources : filteredAndSortedRequests).length === 0 && !loading" class="no-results">
+        <div v-if="viewMode === 'archived' && filteredArchivedRequests.length === 0 && !loading" class="no-results">
+          <i class="fas fa-archive text-6xl mb-4"></i>
+          <h3>No archived requests</h3>
+          <p>Requests archived by cleanup automation will appear here.</p>
+        </div>
+        <div v-else-if="viewMode !== 'ai-requests' && viewMode !== 'archived' && (viewMode === 'by-content' ? filteredAndSortedSources : filteredAndSortedRequests).length === 0 && !loading" class="no-results">
           <i class="fas fa-inbox text-6xl mb-4"></i>
           <h3>No {{ viewMode === 'by-content' ? 'content' : 'requests' }} found</h3>
           <p v-if="hasActiveFilters">Try adjusting your filters</p>
           <p v-else>Start watching content to see suggestions here</p>
+        </div>
+        <div
+          v-if="hasMoreData && viewMode === 'archived'"
+          ref="loadMoreTriggerArchived"
+          class="load-more-trigger">
+          <div class="spinner-small"></div>
+          <p>Loading more archived requests...</p>
         </div>
         <div v-if="viewMode === 'ai-requests' && filteredAiRequests.length === 0 && !loading" class="no-results">
           <i class="fas fa-magic text-6xl mb-4"></i>
@@ -355,13 +418,14 @@ import RequestPosterCard from '@/components/common/RequestPosterCard.vue';
 import RequestDetailsModal from '@/components/common/RequestDetailsModal.vue';
 import RatingBadges from '@/components/common/RatingBadges.vue';
 import { formatDate } from '@/utils/dateUtils.js';
-import { SEER_STATUS_FILTER_OPTIONS, matchesSeerStatusFilter } from '@/utils/seerStatus.js';
+import { SEER_STATUS_FILTER_OPTIONS, matchesSeerStatusFilter, formatSeerStatusLabel } from '@/utils/seerStatus.js';
 import { getRequestSourceVisual } from '@/utils/jobTypeVisuals.js';
 import { getRatingBadgeSettings } from '@/utils/ratingBadgeConfig.js';
 import {
   getAiSearchRequests,
   getAutomationRequestsFlat,
   getAutomationRequestsBySource,
+  getArchivedRequests,
 } from '@/api/api.js';
 
 export default {
@@ -415,6 +479,11 @@ export default {
       aiRequestsPage: 1,
       aiRequestsTotalPages: 1,
       aiObserver: null,
+      archivedRequests: [],
+      archivedTotal: 0,
+      archivedPage: 1,
+      archivedTotalPages: 1,
+      archivedPerPage: 24,
       sortOptions: [
         { value: 'date-desc', label: 'Date (Newest)' },
         { value: 'date-asc', label: 'Date (Oldest)' },
@@ -445,6 +514,9 @@ export default {
       }
       if (this.viewMode === 'ai-requests') {
         return this.filteredAiRequests.length;
+      }
+      if (this.viewMode === 'archived') {
+        return this.filteredArchivedRequests.length;
       }
       return this.filteredAndSortedRequests.length;
     },
@@ -527,6 +599,24 @@ export default {
       return filtered;
     },
 
+    filteredArchivedRequests() {
+      const query = this.searchQuery.toLowerCase();
+      let filtered = [...(this.archivedRequests || [])];
+
+      if (this.mediaTypeFilter !== 'all') {
+        filtered = filtered.filter((request) => request.media_type === this.mediaTypeFilter);
+      }
+
+      if (query) {
+        filtered = filtered.filter((request) =>
+          (request.title && request.title.toLowerCase().includes(query))
+          || (request.source_origin && request.source_origin.toLowerCase().includes(query))
+        );
+      }
+
+      return filtered;
+    },
+
     filteredAndSortedSources() {
       return this.filteredSources;
     },
@@ -539,6 +629,9 @@ export default {
       if (this.viewMode === 'ai-requests') {
         return this.aiRequestsPage < this.aiRequestsTotalPages;
       }
+      if (this.viewMode === 'archived') {
+        return this.archivedPage < this.archivedTotalPages;
+      }
       if (this.viewMode === 'all-requests') {
         return this.flatCurrentPage < this.flatTotalPages;
       }
@@ -548,6 +641,9 @@ export default {
     isInitialLoad() {
       if (this.viewMode === 'ai-requests') {
         return this.aiRequests.length === 0;
+      }
+      if (this.viewMode === 'archived') {
+        return this.archivedRequests.length === 0;
       }
       if (this.viewMode === 'all-requests') {
         return this.flatRequests.length === 0;
@@ -564,6 +660,12 @@ export default {
       if (newMode === 'ai-requests') {
         if (this.aiRequests.length === 0) {
           this.fetchAiRequests(1);
+        }
+        return;
+      }
+      if (newMode === 'archived') {
+        if (this.archivedRequests.length === 0) {
+          this.fetchArchivedRequests(1);
         }
         return;
       }
@@ -586,6 +688,12 @@ export default {
         this.aiRequests = [];
         this.aiRequestsPage = 1;
         this.fetchAiRequests(1);
+        return;
+      }
+      if (this.viewMode === 'archived') {
+        this.archivedRequests = [];
+        this.archivedPage = 1;
+        this.fetchArchivedRequests(1);
         return;
       }
       this.resetAndReload();
@@ -660,6 +768,7 @@ export default {
     },
 
     formatDate,
+    formatSeerStatusLabel,
 
     filterRequestList(requests) {
       let filtered = [...(requests || [])];
@@ -776,6 +885,64 @@ export default {
       }
     },
 
+    switchToArchived() {
+      this.viewMode = 'archived';
+      if (this.archivedRequests.length === 0) {
+        this.fetchArchivedRequests(1);
+      }
+    },
+
+    async fetchArchivedRequests(page = 1) {
+      if ((page > this.archivedTotalPages && page > 1) || this.loading) {
+        return;
+      }
+
+      this.loading = true;
+      try {
+        const response = await getArchivedRequests(page, this.archivedPerPage, this.sortBy);
+        const { data, total, total_pages: totalPages } = response.data;
+
+        if (page === 1) {
+          this.archivedRequests = data;
+          this.archivedTotal = total;
+        } else {
+          this.archivedRequests = [...this.archivedRequests, ...data];
+        }
+
+        this.archivedPage = page;
+        this.archivedTotalPages = totalPages;
+
+        this.$nextTick(() => {
+          setTimeout(() => this.initArchivedObserver(), 150);
+        });
+      } catch (error) {
+        console.error('Failed to fetch archived requests:', error);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    initArchivedObserver() {
+      if (this.observer) {
+        this.observer.disconnect();
+        this.observer = null;
+      }
+      if (!this.hasMoreData || this.viewMode !== 'archived') {
+        return;
+      }
+      this.$nextTick(() => {
+        const trigger = this.$refs.loadMoreTriggerArchived;
+        if (trigger) {
+          this.observer = new IntersectionObserver(async (entries) => {
+            if (entries[0].isIntersecting && !this.loading) {
+              await this.fetchArchivedRequests(this.archivedPage + 1);
+            }
+          }, { rootMargin: '300px', threshold: 0 });
+          this.observer.observe(trigger);
+        }
+      });
+    },
+
     async fetchAiRequests(page = 1) {
       if (this.loading) return;
       this.loading = true;
@@ -830,6 +997,10 @@ export default {
 
     async observeIntersection(entries) {
       if (entries[0].isIntersecting && !this.loading) {
+        if (this.viewMode === 'archived') {
+          await this.fetchArchivedRequests(this.archivedPage + 1);
+          return;
+        }
         if (this.viewMode === 'all-requests') {
           await this.fetchFlatRequests(this.flatCurrentPage + 1);
           return;
@@ -856,9 +1027,11 @@ export default {
       }
 
       this.$nextTick(() => {
-        const triggerRef = this.viewMode === 'by-content' 
-          ? this.$refs.loadMoreTrigger 
-          : this.$refs.loadMoreTriggerRequests;
+        const triggerRef = this.viewMode === 'by-content'
+          ? this.$refs.loadMoreTrigger
+          : this.viewMode === 'archived'
+            ? this.$refs.loadMoreTriggerArchived
+            : this.$refs.loadMoreTriggerRequests;
 
         if (triggerRef) {
           this.observer = new IntersectionObserver(this.observeIntersection, {
@@ -1027,6 +1200,11 @@ export default {
     this.refreshConfigFromStorage();
     window.addEventListener('storage', this.refreshConfigFromStorage);
 
+    const tab = this.$route?.query?.tab;
+    if (tab === 'archived') {
+      this.viewMode = 'archived';
+    }
+
     this.$nextTick(() => {
       if (this.config.ENABLE_STATIC_BACKGROUND) {
         // do not start rotation
@@ -1039,7 +1217,9 @@ export default {
       await this.loadTraktDefaults();
       this.setTraktModalTargetResolver(() => this.getTraktModalTarget(this.selectedSource));
       this.setSeerModalTargetResolver(() => this.getSeerModalTarget(this.selectedSource));
-      if (this.viewMode === 'all-requests') {
+      if (this.viewMode === 'archived') {
+        this.fetchArchivedRequests(1);
+      } else if (this.viewMode === 'all-requests') {
         this.fetchFlatRequests(1);
       } else {
         this.fetchRequests(1);

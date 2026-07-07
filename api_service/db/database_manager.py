@@ -215,6 +215,9 @@ class DatabaseManager:
                     seer_media_status INTEGER,
                     seer_status TEXT,
                     seer_updated_at TIMESTAMP,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    archived_at TIMESTAMP,
+                    archive_reason TEXT,
                     UNIQUE(media_type, tmdb_request_id, tmdb_source_id),
                     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )
@@ -695,6 +698,21 @@ class DatabaseManager:
                     if self.db_type in ['mysql', 'mariadb'] and column_type == 'TEXT':
                         column_type = 'VARCHAR(512)'
                     cursor.execute(f"ALTER TABLE requests ADD COLUMN {column_name} {column_type};")
+                    conn.commit()
+
+                archive_columns = {
+                    'is_active': 'INTEGER NOT NULL DEFAULT 1',
+                    'archived_at': 'TIMESTAMP',
+                    'archive_reason': 'TEXT',
+                }
+                for column_name, column_def in archive_columns.items():
+                    if column_name in existing_columns:
+                        continue
+                    self.logger.debug("Adding column %s...", column_name)
+                    if self.db_type in ['mysql', 'mariadb'] and column_name == 'is_active':
+                        cursor.execute("ALTER TABLE requests ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1;")
+                    else:
+                        cursor.execute(f"ALTER TABLE requests ADD COLUMN {column_name} {column_def};")
                     conn.commit()
                     
             except Exception as e:
@@ -1221,8 +1239,20 @@ class DatabaseManager:
         source_origin: Optional[str] = None,
         requested_at: Optional[str] = None,
     ) -> None:
-        """Save a new media request to the database, ignoring duplicates."""
+        """Save a new media request to the database, reactivating archived rows when needed."""
         self.logger.debug(f"Saving request: {media_type} {media_id} from {source} (anime={is_anime}, origin={source_origin})")
+
+        if self._reactivate_archived_request(
+            media_type=media_type,
+            media_id=media_id,
+            source=source,
+            user_id=user_id,
+            is_anime=is_anime,
+            rationale=rationale,
+            source_origin=source_origin,
+            requested_at=requested_at,
+        ):
+            return
 
         query = """
 
@@ -1255,6 +1285,68 @@ class DatabaseManager:
                 cursor.execute(update_query, (requested_at, str(media_id), media_type, source))
 
             conn.commit()
+
+    def _reactivate_archived_request(
+        self,
+        media_type: str,
+        media_id: str,
+        source: str,
+        user_id: Optional[str] = None,
+        is_anime: bool = False,
+        rationale: Optional[str] = None,
+        source_origin: Optional[str] = None,
+        requested_at: Optional[str] = None,
+    ) -> bool:
+        """Reactivate an archived request row when the same source requests again."""
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""SELECT 1 FROM requests
+                    WHERE tmdb_request_id = {placeholder}
+                      AND media_type = {placeholder}
+                      AND tmdb_source_id = {placeholder}
+                      AND requested_by = 'SuggestArr'
+                      AND COALESCE(is_active, 1) = 0""",
+                (str(media_id), media_type, source),
+            )
+            if cursor.fetchone() is None:
+                return False
+
+            sets = [
+                f"is_active = {placeholder}",
+                "archived_at = NULL",
+                "archive_reason = NULL",
+                f"user_id = {placeholder}",
+                f"is_anime = {placeholder}",
+                f"rationale = {placeholder}",
+                f"source_origin = {placeholder}",
+                "seer_request_id = NULL",
+                "seer_request_status = NULL",
+                "seer_media_status = NULL",
+                "seer_status = NULL",
+                "seer_updated_at = NULL",
+            ]
+            params = [1, user_id, is_anime, rationale, source_origin]
+            if requested_at:
+                sets.append(f"requested_at = {placeholder}")
+                params.append(requested_at)
+            else:
+                sets.append("requested_at = CURRENT_TIMESTAMP")
+
+            params.extend([str(media_id), media_type, source])
+            cursor.execute(
+                f"""UPDATE requests
+                    SET {', '.join(sets)}
+                    WHERE tmdb_request_id = {placeholder}
+                      AND media_type = {placeholder}
+                      AND tmdb_source_id = {placeholder}
+                      AND requested_by = 'SuggestArr'
+                      AND COALESCE(is_active, 1) = 0""",
+                params,
+            )
+            conn.commit()
+            return cursor.rowcount > 0
     
     def save_user(self, user: Dict[str, Any]) -> None:
         """Save a new user to the database, ignoring duplicates."""
@@ -1286,7 +1378,9 @@ class DatabaseManager:
         self.logger.debug(f"Checking if request exists: {media_type} {media_id}")
         
         query = """
-            SELECT 1 FROM requests WHERE tmdb_request_id = ? AND media_type = ?
+            SELECT 1 FROM requests
+            WHERE tmdb_request_id = ? AND media_type = ?
+              AND COALESCE(is_active, 1) = 1
         """
         params = (str(media_id), media_type)
         
@@ -1313,7 +1407,7 @@ class DatabaseManager:
         self.logger.debug("Checking bulk requests exists: %s for %d items", media_type, len(media_ids))
         
         placeholders = ', '.join(['%s' if self.db_type in ['mysql', 'postgres'] else '?' for _ in media_ids])
-        query = f"SELECT tmdb_request_id FROM requests WHERE media_type = ? AND tmdb_request_id IN ({placeholders})"
+        query = f"SELECT tmdb_request_id FROM requests WHERE media_type = ? AND tmdb_request_id IN ({placeholders}) AND COALESCE(is_active, 1) = 1"
         
         params = [media_type] + [str(mid) for mid in media_ids]
         
@@ -1666,6 +1760,15 @@ class DatabaseManager:
         return """
             r.requested_by = 'SuggestArr'
             AND COALESCE(r.tmdb_source_id, '') != 'ai_search'
+            AND COALESCE(r.is_active, 1) = 1
+        """
+
+    def _requests_archived_filter_sql(self) -> str:
+        """WHERE clause for archived automation request list queries."""
+        return """
+            r.requested_by = 'SuggestArr'
+            AND COALESCE(r.tmdb_source_id, '') != 'ai_search'
+            AND COALESCE(r.is_active, 1) = 0
         """
 
     def _requests_grouped_source_order_sql(self, sort_by: str) -> str:
@@ -2143,7 +2246,7 @@ class DatabaseManager:
 
         :return: Set of tmdb_request_id strings.
         """
-        query = "SELECT DISTINCT tmdb_request_id FROM requests WHERE requested_by = 'SuggestArr'"
+        query = "SELECT DISTINCT tmdb_request_id FROM requests WHERE requested_by = 'SuggestArr' AND COALESCE(is_active, 1) = 1"
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(query)
@@ -2724,12 +2827,107 @@ class DatabaseManager:
                 f"""SELECT r.tmdb_request_id, r.media_type, r.requested_at, m.title
                      FROM requests r
                      LEFT JOIN metadata m ON m.media_id = r.tmdb_request_id AND m.media_type = r.media_type
-                     WHERE r.requested_by = 'SuggestArr' AND r.requested_at < {placeholder}
+                     WHERE r.requested_by = 'SuggestArr'
+                       AND COALESCE(r.is_active, 1) = 1
+                       AND r.requested_at < {placeholder}
                      ORDER BY r.requested_at ASC""",
                 (cutoff_iso,),
             )
             return [{'tmdb_id': str(row[0]), 'media_type': row[1], 'requested_at': row[2], 'title': row[3]}
                     for row in cursor.fetchall()]
+
+    def archive_request_row(self, tmdb_id: str, media_type: str, reason: str = 'grace_cleanup') -> int:
+        """Soft-archive SuggestArr request rows for a media item.
+
+        :param tmdb_id: TMDB id of the requested media.
+        :param media_type: ``movie`` or ``tv``.
+        :param reason: Archive reason label stored for history.
+        :return: Number of rows archived.
+        """
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        archived_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""UPDATE requests
+                    SET is_active = {placeholder},
+                        archived_at = {placeholder},
+                        archive_reason = {placeholder}
+                    WHERE tmdb_request_id = {placeholder}
+                      AND media_type = {placeholder}
+                      AND requested_by = 'SuggestArr'
+                      AND COALESCE(is_active, 1) = 1""",
+                (0, archived_at, reason, str(tmdb_id), media_type),
+            )
+            archived = cursor.rowcount
+            conn.commit()
+            return archived
+
+    def get_archived_requests_flat(
+        self,
+        page: int = 1,
+        per_page: int = 24,
+        sort_by: str = 'date-desc',
+    ) -> Dict[str, Any]:
+        """Return archived automation requests with SQL pagination."""
+        ph = self._ph()
+        filter_sql = self._requests_archived_filter_sql()
+        if sort_by == 'date-asc':
+            order_by_clause = 'r.archived_at ASC, r.requested_at ASC'
+        else:
+            order_by_clause = 'r.archived_at DESC, r.requested_at DESC'
+
+        count_query = f"""
+            SELECT COUNT(*)
+            FROM requests r
+            JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
+            WHERE {filter_sql}
+        """
+
+        select_query = f"""
+            SELECT
+                r.tmdb_request_id, r.media_type, r.requested_at, r.archived_at,
+                r.archive_reason, r.seer_status, r.rationale, r.source_origin,
+                m.title, m.poster_path, m.release_date
+            FROM requests r
+            JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
+            WHERE {filter_sql}
+            ORDER BY {order_by_clause}
+            LIMIT {ph} OFFSET {ph}
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(count_query)
+            total = (cursor.fetchone() or [0])[0]
+            offset = (page - 1) * per_page
+            cursor.execute(select_query, (per_page, offset))
+            rows = cursor.fetchall()
+
+        items = []
+        for row in rows:
+            items.append({
+                "request_id": row[0],
+                "media_type": row[1],
+                "requested_at": row[2],
+                "archived_at": row[3],
+                "archive_reason": row[4],
+                "seer_status": row[5],
+                "rationale": row[6],
+                "source_origin": row[7],
+                "title": row[8],
+                "poster_path": row[9],
+                "release_date": row[10],
+            })
+
+        total_pages = max(1, (total + per_page - 1) // per_page) if total else 0
+        return {
+            "data": items,
+            "total": total,
+            "total_pages": total_pages,
+            "current_page": page,
+            "per_page": per_page,
+        }
 
     def delete_request_row(self, tmdb_id: str, media_type: str) -> None:
         placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
@@ -2938,9 +3136,10 @@ class DatabaseManager:
             cursor = conn.cursor()
 
             # Total requests query
-            total_query = """
+            active_filter = "requested_by = 'SuggestArr' AND COALESCE(is_active, 1) = 1"
+            total_query = f"""
                 SELECT COUNT(*) FROM requests
-                WHERE requested_by = 'SuggestArr'
+                WHERE {active_filter}
             """
 
             if self.db_type in ['mysql', 'postgres']:
@@ -2952,21 +3151,21 @@ class DatabaseManager:
 
             # Today's requests query
             if self.db_type == 'sqlite':
-                today_query = """
+                today_query = f"""
                     SELECT COUNT(*) FROM requests
-                    WHERE requested_by = 'SuggestArr'
+                    WHERE {active_filter}
                     AND DATE(requested_at) = DATE('now')
                 """
             elif self.db_type == 'postgres':
-                today_query = """
+                today_query = f"""
                     SELECT COUNT(*) FROM requests
-                    WHERE requested_by = 'SuggestArr'
+                    WHERE {active_filter}
                     AND DATE(requested_at) = CURRENT_DATE
                 """
             elif self.db_type in ['mysql', 'mariadb']:
-                today_query = """
+                today_query = f"""
                     SELECT COUNT(*) FROM requests
-                    WHERE requested_by = 'SuggestArr'
+                    WHERE {active_filter}
                     AND DATE(requested_at) = CURDATE()
                 """
             else:
@@ -2981,21 +3180,21 @@ class DatabaseManager:
 
             # This week's requests query (from Monday to today)
             if self.db_type == 'sqlite':
-                week_query = """
+                week_query = f"""
                     SELECT COUNT(*) FROM requests
-                    WHERE requested_by = 'SuggestArr'
+                    WHERE {active_filter}
                     AND DATE(requested_at) >= DATE('now', '-' || ((CAST(strftime('%w', 'now') AS INTEGER) + 6) % 7) || ' days')
                 """
             elif self.db_type == 'postgres':
-                week_query = """
+                week_query = f"""
                     SELECT COUNT(*) FROM requests
-                    WHERE requested_by = 'SuggestArr'
+                    WHERE {active_filter}
                     AND DATE(requested_at) >= DATE_TRUNC('week', CURRENT_DATE)
                 """
             elif self.db_type in ['mysql', 'mariadb']:
-                week_query = """
+                week_query = f"""
                     SELECT COUNT(*) FROM requests
-                    WHERE requested_by = 'SuggestArr'
+                    WHERE {active_filter}
                     AND DATE(requested_at) >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
                 """
             else:
@@ -3010,21 +3209,21 @@ class DatabaseManager:
 
             # This month's requests query
             if self.db_type == 'sqlite':
-                month_query = """
+                month_query = f"""
                     SELECT COUNT(*) FROM requests
-                    WHERE requested_by = 'SuggestArr'
+                    WHERE {active_filter}
                     AND strftime('%Y-%m', requested_at) = strftime('%Y-%m', 'now')
                 """
             elif self.db_type == 'postgres':
-                month_query = """
+                month_query = f"""
                     SELECT COUNT(*) FROM requests
-                    WHERE requested_by = 'SuggestArr'
+                    WHERE {active_filter}
                     AND DATE_TRUNC('month', requested_at) = DATE_TRUNC('month', CURRENT_DATE)
                 """
             elif self.db_type in ['mysql', 'mariadb']:
-                month_query = """
+                month_query = f"""
                     SELECT COUNT(*) FROM requests
-                    WHERE requested_by = 'SuggestArr'
+                    WHERE {active_filter}
                     AND YEAR(requested_at) = YEAR(CURDATE())
                     AND MONTH(requested_at) = MONTH(CURDATE())
                 """
@@ -3038,13 +3237,25 @@ class DatabaseManager:
             month_result = cursor.fetchone()
             this_month = month_result[0] if month_result else 0
 
+            archived_query = """
+                SELECT COUNT(*) FROM requests
+                WHERE requested_by = 'SuggestArr'
+                  AND COALESCE(is_active, 1) = 0
+            """
+            if self.db_type in ['mysql', 'postgres']:
+                archived_query = archived_query.replace("?", "%s")
+            cursor.execute(archived_query)
+            archived_result = cursor.fetchone()
+            archived_count = archived_result[0] if archived_result else 0
+
             return {
                 "total": total,
                 "approved": 0,  # Not handled on your side
                 "pending": 0,   # Not handled on your side
                 "today": today,
                 "this_week": this_week,
-                "this_month": this_month
+                "this_month": this_month,
+                "archived_count": archived_count,
             }
     
     def test_connection(self, db_config: Dict[str, Any]) -> Dict[str, str]:

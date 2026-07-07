@@ -11,15 +11,10 @@ from api_service.jobs.seer_import_automation import (
     execute_seer_import_job,
     _run_lock as _shared_import_run_lock,
 )
-from api_service.jobs.seer_request_prune_automation import (
-    execute_seer_request_prune_job,
-    _run_lock as _shared_prune_run_lock,
-)
 from api_service.utils.asyncio_loop import run_coroutine_sync
 
 cleanup_bp = Blueprint("cleanup", __name__)
 _run_lock = _shared_run_lock
-_prune_run_lock = _shared_prune_run_lock
 _import_run_lock = _shared_import_run_lock
 logger = LoggerManager.get_logger("CleanupRoute")
 
@@ -105,101 +100,6 @@ def cleanup_log_list():
         return jsonify({"status": "success", "log": rows}), 200
     except Exception as exc:
         logger.error("Failed to fetch cleanup log: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 500
-
-
-def _validate_retention_days(value, field_name: str):
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None, jsonify({"status": "error", "message": f"{field_name} must be an integer"}), 400
-    if parsed < 1 or parsed > 365:
-        return None, jsonify({"status": "error", "message": f"{field_name} must be between 1 and 365"}), 400
-    return parsed, None, None
-
-
-@cleanup_bp.route("/seer-prune/settings", methods=["GET"])
-def seer_prune_settings_get():
-    try:
-        return jsonify({
-            "status": "success",
-            "settings": DatabaseManager().get_seer_request_prune_settings(),
-        }), 200
-    except Exception as exc:
-        logger.error("Failed to fetch Seer request prune settings: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 500
-
-
-@cleanup_bp.route("/seer-prune/settings", methods=["POST"])
-@require_role("admin")
-@limiter.limit("30 per minute")
-def seer_prune_settings_set():
-    try:
-        data = request.json or {}
-        updates = {}
-        for key in ("enabled", "dry_run", "sync_suggestarr"):
-            value = data.get(key)
-            if value is not None:
-                if not isinstance(value, bool):
-                    return jsonify({"status": "error", "message": f"{key} must be a boolean"}), 400
-                updates[key] = value
-
-        for field in ("declined_days", "failed_days", "completed_days", "deleted_days"):
-            value = data.get(field)
-            if value is not None:
-                parsed, error_response, status_code = _validate_retention_days(value, field)
-                if error_response is not None:
-                    return error_response, status_code
-                updates[field] = parsed
-
-        settings = DatabaseManager().update_seer_request_prune_settings(**updates)
-        return jsonify({"status": "success", "settings": settings}), 200
-    except Exception as exc:
-        logger.error("Failed to update Seer request prune settings: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 500
-
-
-@cleanup_bp.route("/seer-prune/run", methods=["POST"])
-@require_role("admin")
-def seer_prune_run_now():
-    if not _prune_run_lock.acquire(blocking=False):
-        return jsonify({
-            "status": "error",
-            "code": "already_running",
-            "message": "A Seer request prune run is already in progress. Please wait for it to finish.",
-        }), 409
-    try:
-        data = request.json or {}
-        override_dry_run = data.get("dry_run")
-        if override_dry_run is not None and not isinstance(override_dry_run, bool):
-            return jsonify({"status": "error", "message": "dry_run must be a boolean"}), 400
-        result = run_coroutine_sync(
-            execute_seer_request_prune_job(force_run=True, override_dry_run=override_dry_run),
-            logger,
-        )
-        return jsonify({"status": "success", "result": result}), 200
-    except Exception as exc:
-        logger.error("Manual Seer request prune run failed: %s", exc)
-        return jsonify({"status": "error", "message": str(exc)}), 500
-    finally:
-        try:
-            _prune_run_lock.release()
-        except RuntimeError:
-            pass
-
-
-@cleanup_bp.route("/seer-prune/log", methods=["GET"])
-def seer_prune_log_list():
-    try:
-        try:
-            limit = int(request.args.get("limit", 100))
-        except (TypeError, ValueError):
-            limit = 100
-        limit = max(1, min(500, limit))
-        rows = DatabaseManager().get_seer_request_prune_log(limit=limit)
-        return jsonify({"status": "success", "log": rows}), 200
-    except Exception as exc:
-        logger.error("Failed to fetch Seer request prune log: %s", exc)
         return jsonify({"status": "error", "message": str(exc)}), 500
 
 

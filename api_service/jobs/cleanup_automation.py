@@ -1,6 +1,6 @@
-"""Cleanup automation: prune SuggestArr-originated requests when the
-underlying media has not been favorited in the configured media server within
-a configurable grace period.
+"""Cleanup automation: auto-decline pending Seer requests and archive SuggestArr
+rows when the underlying media has not been favorited in the configured media
+server within a configurable grace period.
 
 Safe by default: only runs when explicitly enabled, and starts in dry-run mode.
 """
@@ -15,11 +15,13 @@ from api_service.services.config_service import ConfigService
 from api_service.services.jellyfin.jellyfin_client import JellyfinClient
 from api_service.services.plex.plex_client import PlexClient
 from api_service.services.seer.seer_client import SeerClient
+from api_service.services.seer.seer_status import is_pending_status
 
 
 _run_lock = threading.Lock()
 FAVORITE_USER_RATING = 10.0
 SUPPORTED_MEDIA_SERVICES = {"plex", "jellyfin", "emby"}
+ARCHIVE_REASON = "grace_cleanup"
 
 
 def _format_utc_timestamp(dt: datetime) -> str:
@@ -182,6 +184,18 @@ def _missing_service_config(env_vars: Dict, media_service: str) -> Optional[str]
     return None
 
 
+def _pending_seer_request_ids(seer_requests: List[Dict]) -> List[int]:
+    """Return Seer request ids that are still pending approval."""
+    pending_ids = []
+    for request in seer_requests or []:
+        request_id = request.get('id')
+        if request_id is None:
+            continue
+        if is_pending_status(request.get('status')):
+            pending_ids.append(int(request_id))
+    return pending_ids
+
+
 async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optional[bool] = None) -> Dict:
     """Run the cleanup pass.
 
@@ -226,46 +240,32 @@ async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optiona
         summary = f"No requests older than {grace_days} days."
         db.update_cleanup_settings(last_run_at=_utcnow_for_db(),
                                    last_run_status='ok', last_run_summary=summary)
-        return {'status': 'ok', 'summary': summary, 'deleted': 0, 'kept': 0, 'missing': 0}
+        return {'status': 'ok', 'summary': summary, 'declined': 0, 'archived': 0, 'kept': 0, 'errors': 0}
 
     favorite_map = await _build_favorite_map(env_vars, media_service)
 
-    seer_client = None
-    seer_requests_index = {}
-    if candidates:
-        seer_client = SeerClient(
-            env_vars['SEER_API_URL'],
-            env_vars['SEER_TOKEN'],
-            env_vars.get('SEER_USER_NAME'),
-            env_vars.get('SEER_USER_PSW'),
-            env_vars.get('SEER_SESSION_TOKEN'),
-            'all',
-            False,
-            False,
-            {},
-            False,
-        )
-        seer_requests_index = await seer_client.get_requests_index()
+    seer_client = SeerClient(
+        env_vars['SEER_API_URL'],
+        env_vars['SEER_TOKEN'],
+        env_vars.get('SEER_USER_NAME'),
+        env_vars.get('SEER_USER_PSW'),
+        env_vars.get('SEER_SESSION_TOKEN'),
+        'all',
+        False,
+        False,
+        {},
+        False,
+    )
+    seer_requests_index = await seer_client.get_requests_index()
 
-    deleted = kept = missing = errors = 0
+    declined = archived = kept = skipped_not_pending = skipped_not_in_seer = errors = 0
     for cand in candidates:
         tmdb_id = cand['tmdb_id']
         media_type = cand['media_type']
         title = cand.get('title') or f"tmdb:{tmdb_id}"
         rating = favorite_map.get((media_type, str(tmdb_id)))
         seer_requests = seer_requests_index.get((media_type, str(tmdb_id)), [])
-        seer_request_id = next(
-            (request.get('id') for request in seer_requests if request.get('id') is not None),
-            None,
-        )
-
-        if seer_request_id is None:
-            missing += 1
-            db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
-                               action='skipped_not_in_seer', was_dry_run=dry_run,
-                               user_rating=None,
-                               reason='No matching Seer request record was found; nothing was deleted.')
-            continue
+        pending_ids = _pending_seer_request_ids(seer_requests)
 
         if rating is not None and rating >= FAVORITE_USER_RATING:
             kept += 1
@@ -275,47 +275,108 @@ async def execute_cleanup_job(force_run: bool = False, override_dry_run: Optiona
             continue
 
         if dry_run:
+            if pending_ids:
+                db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
+                                   action='would_decline', was_dry_run=True,
+                                   user_rating=rating,
+                                   reason=f'Not favorited after {grace_days} days; would decline pending Seer request(s).')
+                declined += 1
+            elif seer_requests:
+                skipped_not_pending += 1
+                db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
+                                   action='skipped_not_pending', was_dry_run=True,
+                                   user_rating=rating,
+                                   reason='Seer request exists but is not pending; no Seer action.')
+            else:
+                skipped_not_in_seer += 1
+                db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
+                                   action='skipped_not_in_seer', was_dry_run=True,
+                                   user_rating=rating,
+                                   reason='No matching Seer request record; SuggestArr row would still be archived.')
+
             db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
-                               action='would_delete', was_dry_run=True,
+                               action='would_archive', was_dry_run=True,
                                user_rating=rating,
-                               reason=f'Not favorited after {grace_days} days; would delete the Seer request record.')
-            deleted += 1
+                               reason=f'Not favorited after {grace_days} days; would archive SuggestArr request row(s).')
+            archived += 1
             continue
 
+        seer_declined = False
+        if pending_ids:
+            for request_id in pending_ids:
+                try:
+                    ok = await seer_client.decline_request(request_id)
+                    if ok:
+                        seer_declined = True
+                    else:
+                        errors += 1
+                        db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
+                                           action='decline_failed', was_dry_run=False,
+                                           user_rating=rating,
+                                           reason=f'Seer decline failed for request id {request_id}.')
+                except Exception as exc:
+                    errors += 1
+                    logger.error("Cleanup: error declining tmdb_id=%s request_id=%s: %s",
+                                 tmdb_id, request_id, exc)
+                    db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
+                                       action='error', was_dry_run=False, user_rating=rating,
+                                       reason=str(exc)[:500])
+            if seer_declined:
+                declined += 1
+                db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
+                                   action='declined', was_dry_run=False,
+                                   user_rating=rating,
+                                   reason=f'Not favorited after {grace_days} days; declined pending Seer request(s).')
+        elif seer_requests:
+            skipped_not_pending += 1
+            db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
+                               action='skipped_not_pending', was_dry_run=False,
+                               user_rating=rating,
+                               reason='Seer request exists but is not pending; no Seer action.')
+        else:
+            skipped_not_in_seer += 1
+            db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
+                               action='skipped_not_in_seer', was_dry_run=False,
+                               user_rating=rating,
+                               reason='No matching Seer request record; archiving SuggestArr row only.')
+
         try:
-            ok = await seer_client.delete_request(seer_request_id)
-            if ok:
-                deleted += 1
-                db.delete_request_row(tmdb_id, media_type)
+            archived_count = db.archive_request_row(tmdb_id, media_type, reason=ARCHIVE_REASON)
+            if archived_count:
+                archived += archived_count
                 db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
-                                   action='deleted', was_dry_run=False,
+                                   action='archived', was_dry_run=False,
                                    user_rating=rating,
-                                   reason=f'Not favorited after {grace_days} days; Seer accepted the request-record deletion.')
-            else:
-                errors += 1
-                db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
-                                   action='delete_failed', was_dry_run=False,
-                                   user_rating=rating,
-                                   reason='Seer request DELETE returned a non-success status; see logs.')
+                                   reason=f'Archived {archived_count} SuggestArr request row(s).')
         except Exception as exc:
             errors += 1
-            logger.error("Cleanup: error deleting tmdb_id=%s media_type=%s: %s", tmdb_id, media_type, exc)
+            logger.error("Cleanup: error archiving tmdb_id=%s media_type=%s: %s", tmdb_id, media_type, exc)
             db.add_cleanup_log(tmdb_id=tmdb_id, media_type=media_type, title=title,
                                action='error', was_dry_run=False, user_rating=rating,
                                reason=str(exc)[:500])
 
-    if seer_client is not None:
-        try:
-            await seer_client.close()
-        except Exception:
-            pass
+    try:
+        await seer_client.close()
+    except Exception:
+        pass
 
     summary = (f"Candidates={len(candidates)} "
-               f"{'would_delete' if dry_run else 'deleted'}={deleted} "
-               f"kept_favorited={kept} not_in_seer={missing} errors={errors}")
+               f"{'would_decline' if dry_run else 'declined'}={declined} "
+               f"{'would_archive' if dry_run else 'archived'}={archived} "
+               f"kept_favorited={kept} not_pending={skipped_not_pending} "
+               f"not_in_seer={skipped_not_in_seer} errors={errors}")
     db.update_cleanup_settings(last_run_at=_utcnow_for_db(),
                                last_run_status=('dry_run' if dry_run else 'ok'),
                                last_run_summary=summary)
     logger.info("Cleanup run finished: %s", summary)
-    return {'status': 'ok', 'summary': summary, 'dry_run': dry_run,
-            'deleted': deleted, 'kept': kept, 'missing': missing, 'errors': errors}
+    return {
+        'status': 'ok',
+        'summary': summary,
+        'dry_run': dry_run,
+        'declined': declined,
+        'archived': archived,
+        'kept': kept,
+        'skipped_not_pending': skipped_not_pending,
+        'skipped_not_in_seer': skipped_not_in_seer,
+        'errors': errors,
+    }

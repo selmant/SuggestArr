@@ -174,6 +174,31 @@ def get_ai_requests():
         return jsonify({"error": "An internal error occurred"}), 500
 
 
+@automation_bp.route('/requests/archived', methods=['GET'])
+def get_archived_requests():
+    """Get archived automation requests as a flat paginated list."""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 24, type=int)
+        sort_by = request.args.get('sort_by', 'date-desc', type=str)
+
+        valid_sorts = ['date-desc', 'date-asc']
+        if sort_by not in valid_sorts:
+            sort_by = 'date-desc'
+
+        per_page = max(1, min(per_page, 100))
+        db_manager = DatabaseManager()
+        result = db_manager.get_archived_requests_flat(
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+        )
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Error retrieving archived requests: {e}", exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
 @automation_bp.route('/requests/stats', methods=['GET'])
 def get_requests_stats():
     """Get statistics for automation requests."""

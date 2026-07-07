@@ -55,26 +55,6 @@ class TestCleanupRoutePermissions(unittest.TestCase):
         self.assertEqual(resp.get_json(), {"status": "success", "result": result})
         execute_cleanup_job.assert_awaited_once_with(force_run=True, override_dry_run=True)
 
-    def test_non_admin_cannot_update_seer_prune_settings(self):
-        resp = self.client.post("/api/cleanup/seer-prune/settings", json={"enabled": False})
-
-        self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.get_json(), {"error": "Insufficient permissions"})
-
-    def test_admin_seer_prune_run_awaits_coroutine(self):
-        self._caller = {"id": "1", "username": "admin", "role": "admin"}
-        result = {"status": "ok", "summary": "scanned=0 would_delete=0 skipped=0 synced_suggestarr=0 errors=0", "dry_run": True}
-
-        with patch(
-            "api_service.blueprints.cleanup.routes.execute_seer_request_prune_job",
-            new=AsyncMock(return_value=result),
-        ) as execute_seer_request_prune_job:
-            resp = self.client.post("/api/cleanup/seer-prune/run", json={"dry_run": True})
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json(), {"status": "success", "result": result})
-        execute_seer_request_prune_job.assert_awaited_once_with(force_run=True, override_dry_run=True)
-
     def test_admin_seer_import_run_awaits_coroutine(self):
         self._caller = {"id": "1", "username": "admin", "role": "admin"}
         result = {"status": "ok", "summary": "candidates=0 would_import=0 skipped_existing=0 metadata_fallback=0 errors=0", "dry_run": True}

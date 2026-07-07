@@ -273,32 +273,6 @@ try:
         replace_existing=True,
     )
 
-    from api_service.jobs.seer_request_prune_automation import (
-        execute_seer_request_prune_job,
-        _run_lock as _seer_prune_run_lock,
-    )
-    def _run_seer_request_prune_job():
-        if not _seer_prune_run_lock.acquire(blocking=False):
-            logger.info("Seer request prune cron skipped: a run is already in progress.")
-            return
-        try:
-            _asyncio.run(execute_seer_request_prune_job())
-        except Exception as exc:
-            logger.error(f"Seer request prune job error: {exc}")
-        finally:
-            try:
-                _seer_prune_run_lock.release()
-            except RuntimeError:
-                pass
-    job_manager.scheduler.add_job(
-        _run_seer_request_prune_job,
-        'cron',
-        hour=4, minute=30,
-        id='seer_request_prune_automation',
-        max_instances=1,
-        replace_existing=True,
-    )
-
     from api_service.jobs.seer_import_automation import (
         execute_seer_import_job,
         _run_lock as _seer_import_run_lock,
@@ -324,7 +298,7 @@ try:
         max_instances=1,
         replace_existing=True,
     )
-    logger.info("Jobs scheduler initialized (discover + recommendation + trakt_recommendations + queue_worker + cleanup + seer_request_prune + seer_import)")
+    logger.info("Jobs scheduler initialized (discover + recommendation + trakt_recommendations + queue_worker + cleanup + seer_import)")
 except Exception as e:
     import traceback
     logger.error(f"Failed to initialize discover jobs scheduler: {e}")

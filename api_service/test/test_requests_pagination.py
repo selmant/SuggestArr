@@ -94,3 +94,68 @@ def test_get_requests_for_source_paginates(tmp_path):
     assert len(page_one["data"]["requests"]) == 20
     assert len(page_two["data"]["requests"]) == 20
     assert page_one["data"]["requests"][0]["request_id"] != page_two["data"]["requests"][0]["request_id"]
+
+
+def test_archive_request_excludes_from_active_checks_and_list(tmp_path):
+    patches = _sqlite_db(tmp_path)
+    with patches[0], patches[1]:
+        DatabaseManager._instance = None
+        db = DatabaseManager()
+        db.save_metadata({"id": "archived-id", "title": "Archived Movie"}, "movie")
+        db.save_request("movie", "archived-id", DISCOVER_SOURCE)
+
+        assert db.check_request_exists("movie", "archived-id") is True
+        archived_count = db.archive_request_row("archived-id", "movie", reason="grace_cleanup")
+        assert archived_count == 1
+        assert db.check_request_exists("movie", "archived-id") is False
+
+        active = db.get_all_requests_flat(page=1, per_page=10)
+        archived = db.get_archived_requests_flat(page=1, per_page=10)
+
+    DatabaseManager._instance = None
+
+    assert active["total"] == 0
+    assert archived["total"] == 1
+    assert archived["data"][0]["archive_reason"] == "grace_cleanup"
+
+
+def test_save_request_reactivates_archived_row(tmp_path):
+    patches = _sqlite_db(tmp_path)
+    with patches[0], patches[1]:
+        DatabaseManager._instance = None
+        db = DatabaseManager()
+        db.save_metadata({"id": "reactivate-id", "title": "Reactivate Movie"}, "movie")
+        db.save_request("movie", "reactivate-id", DISCOVER_SOURCE, rationale="first")
+        db.archive_request_row("reactivate-id", "movie", reason="grace_cleanup")
+        assert db.check_request_exists("movie", "reactivate-id") is False
+
+        db.save_request("movie", "reactivate-id", DISCOVER_SOURCE, rationale="second")
+        assert db.check_request_exists("movie", "reactivate-id") is True
+
+        active = db.get_all_requests_flat(page=1, per_page=10)
+        archived = db.get_archived_requests_flat(page=1, per_page=10)
+
+    DatabaseManager._instance = None
+
+    assert active["total"] == 1
+    assert archived["total"] == 0
+    assert active["data"][0]["rationale"] == "second"
+
+
+def test_get_requests_stats_counts_active_and_archived_separately(tmp_path):
+    patches = _sqlite_db(tmp_path)
+    with patches[0], patches[1]:
+        DatabaseManager._instance = None
+        db = DatabaseManager()
+        db.save_metadata({"id": "active-id", "title": "Active"}, "movie")
+        db.save_metadata({"id": "old-id", "title": "Old"}, "movie")
+        db.save_request("movie", "active-id", DISCOVER_SOURCE)
+        db.save_request("movie", "old-id", DISCOVER_SOURCE)
+        db.archive_request_row("old-id", "movie")
+
+        stats = db.get_requests_stats()
+
+    DatabaseManager._instance = None
+
+    assert stats["total"] == 1
+    assert stats["archived_count"] == 1
