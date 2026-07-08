@@ -358,6 +358,9 @@ export function useRequestTraktActions() {
   function queueSilentTraktStatusUpdates(statuses, stars) {
     pendingSilentStatuses = { ...pendingSilentStatuses, ...statuses };
     pendingSilentStars = { ...pendingSilentStars, ...stars };
+    if (posterSilentPrefetchDepth > 0) {
+      return;
+    }
     if (!silentStatusFlushTimer) {
       silentStatusFlushTimer = setTimeout(flushSilentTraktStatusUpdates, SILENT_STATUS_FLUSH_MS);
     }

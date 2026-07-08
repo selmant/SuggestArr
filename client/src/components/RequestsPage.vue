@@ -873,6 +873,7 @@ export default {
           forceTrakt: false,
           forceSeer: true,
         });
+        await this.$nextTick();
       } catch (error) {
         console.warn('Could not refresh statuses for Seer filter:', error);
       } finally {

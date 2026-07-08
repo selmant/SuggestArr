@@ -263,6 +263,9 @@ export function useRequestSeerActions() {
 
   function queueSilentSeerStatusUpdates(statuses) {
     pendingSilentStatuses = { ...pendingSilentStatuses, ...statuses };
+    if (posterSilentPrefetchDepth > 0) {
+      return;
+    }
     if (!silentStatusFlushTimer) {
       silentStatusFlushTimer = setTimeout(flushSilentSeerStatusUpdates, SILENT_STATUS_FLUSH_MS);
     }
@@ -446,12 +449,30 @@ export function useRequestSeerActions() {
     }
   }
 
+  async function resetPosterSeerPrefetchForForce() {
+    if (posterFlushTimer) {
+      clearTimeout(posterFlushTimer);
+      posterFlushTimer = null;
+    }
+    if (silentStatusFlushTimer) {
+      clearTimeout(silentStatusFlushTimer);
+      silentStatusFlushTimer = null;
+    }
+    if (batchPrefetchPromise) {
+      await batchPrefetchPromise;
+    }
+    queuedPosterItems.clear();
+  }
+
   async function prefetchPosterSeerStatusesAsync(requests, { silent = false, force = false } = {}) {
     posterPrefetchSilent = silent;
     if (silent) {
       posterSilentPrefetchDepth += 1;
     }
     try {
+      if (force) {
+        await resetPosterSeerPrefetchForForce();
+      }
       for (const item of (requests || [])) {
         queuePosterSeerStatus(item, { force });
       }
