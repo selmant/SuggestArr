@@ -125,6 +125,14 @@ export function useRequestSeerActions() {
     return true;
   }
 
+  /**
+   * @param {Array<object>} requests
+   * @returns {boolean}
+   */
+  function allRequestsHaveFreshSeerStatus(requests) {
+    return (requests || []).every((item) => !canShowRelatedSeer(item) || hasFreshSeerStatus(item));
+  }
+
   function rememberSeerStatus(item, status) {
     if (!item?.request_id) {
       return;
@@ -592,6 +600,8 @@ export function useRequestSeerActions() {
     canShowRelatedSeer,
     getSeerModalTarget,
     getSeerStatus,
+    hasFreshSeerStatus,
+    allRequestsHaveFreshSeerStatus,
     getSeerInlineLabel,
     canActionSeer,
     isSeerBusy,

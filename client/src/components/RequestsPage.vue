@@ -475,6 +475,7 @@ export default {
       sortBy: 'date-desc',
       mediaTypeFilter: 'all',
       seerStatusFilter: 'all',
+      appliedSeerStatusFilter: 'all',
       showModal: false,
       selectedSource: null,
       loading: false,
@@ -732,7 +733,19 @@ export default {
       this.reinitObserverAfterFilter();
     },
 
-    seerStatusFilter() {
+    seerStatusFilter(newValue, oldValue) {
+      if (newValue === oldValue) {
+        return;
+      }
+
+      if (newValue === 'all') {
+        this.appliedSeerStatusFilter = 'all';
+        this.filterIntegrationLoading = false;
+        this.reinitObserverAfterFilter();
+        return;
+      }
+
+      this.filterIntegrationLoading = true;
       void this.refreshSeerFilterStatuses();
     },
     
@@ -826,7 +839,7 @@ export default {
         filtered = filtered.filter((request) => request.media_type === this.mediaTypeFilter);
       }
 
-      if (this.seerStatusFilter !== 'all') {
+      if (this.appliedSeerStatusFilter !== 'all') {
         filtered = filtered.filter((request) => this.requestMatchesSeerStatusFilter(request));
       }
 
@@ -834,8 +847,16 @@ export default {
     },
 
     requestMatchesSeerStatusFilter(request) {
+      if (
+        this.appliedSeerStatusFilter !== 'all'
+        && this.canShowRelatedSeer(request)
+        && this.isSeerBusy(request)
+      ) {
+        return false;
+      }
+
       const status = this.getSeerStatus(request)?.seer_status || request?.seer_status;
-      return matchesSeerStatusFilter(status, this.seerStatusFilter);
+      return matchesSeerStatusFilter(status, this.appliedSeerStatusFilter);
     },
 
     loadedRequestsForFilters() {
@@ -854,6 +875,7 @@ export default {
         || this.viewMode === 'archived'
         || this.viewMode === 'ai-requests'
       ) {
+        this.appliedSeerStatusFilter = 'all';
         this.filterIntegrationLoading = false;
         this.reinitObserverAfterFilter();
         return;
@@ -861,6 +883,7 @@ export default {
 
       const requests = this.loadedRequestsForFilters();
       if (!requests.length) {
+        this.appliedSeerStatusFilter = this.seerStatusFilter;
         this.filterIntegrationLoading = false;
         this.reinitObserverAfterFilter();
         return;
@@ -869,13 +892,17 @@ export default {
       const token = ++this.filterIntegrationToken;
       this.filterIntegrationLoading = true;
       try {
-        await this.prefetchRequestIntegrationStatusesAsync(requests, {
-          forceTrakt: false,
-          forceSeer: true,
-        });
+        if (!this.allRequestsHaveFreshSeerStatus(requests)) {
+          await this.prefetchRequestIntegrationStatusesAsync(requests, {
+            forceTrakt: false,
+            forceSeer: true,
+          });
+        }
+        this.appliedSeerStatusFilter = this.seerStatusFilter;
         await this.$nextTick();
       } catch (error) {
         console.warn('Could not refresh statuses for Seer filter:', error);
+        this.appliedSeerStatusFilter = this.seerStatusFilter;
       } finally {
         if (token === this.filterIntegrationToken) {
           this.filterIntegrationLoading = false;
@@ -1090,6 +1117,8 @@ export default {
       this.sortBy = 'date-desc';
       this.mediaTypeFilter = 'all';
       this.seerStatusFilter = 'all';
+      this.appliedSeerStatusFilter = 'all';
+      this.filterIntegrationLoading = false;
       this.searchQuery = '';
     },
 
@@ -1177,7 +1206,14 @@ export default {
           await this.prefetchRequestIntegrationStatusesAsync(mapped);
         } else {
           this.flatRequests = [...this.flatRequests, ...mapped];
-          void this.prefetchRequestIntegrationStatusesAsync(mapped);
+          if (this.appliedSeerStatusFilter !== 'all') {
+            await this.prefetchRequestIntegrationStatusesAsync(mapped, {
+              forceTrakt: false,
+              forceSeer: true,
+            });
+          } else {
+            void this.prefetchRequestIntegrationStatusesAsync(mapped);
+          }
         }
 
         this.flatCurrentPage = page;

@@ -59,15 +59,18 @@ test.describe('Homelab real-data Seer pending filter', () => {
     });
 
     const samples = [];
+    let filterApplied = false;
     const startedAt = Date.now();
     const collectSamples = (async () => {
-      while (Date.now() - startedAt < 5000) {
+      while (Date.now() - startedAt < 8000) {
         samples.push(await readRequestsPageSnapshot(page, { selectors }));
-        await page.waitForTimeout(100);
+        if (!filterApplied && samples.length === 3) {
+          filterApplied = true;
+          await selectSeerStatusFilter(page, 'Pending');
+        }
+        await page.waitForTimeout(75);
       }
     })();
-
-    await selectSeerStatusFilter(page, 'Pending');
 
     await expect.poll(async () => {
       const snapshot = await readRequestsPageSnapshot(page, { selectors });
@@ -97,6 +100,19 @@ test.describe('Homelab real-data Seer pending filter', () => {
       ].join('\n'),
       contentType: 'text/plain',
     });
+
+    const preFilterFlash = samples.slice(0, 4).some((sample, index) => (
+      index > 0
+      && !sample.loaderVisible
+      && sample.posterCount !== initialSnapshot.posterCount
+      && sample.posterCount !== 0
+    ));
+    expect(preFilterFlash, transitionAnalysis.timeline).toBe(false);
+
+    expect(
+      transitionAnalysis.loaderGridOverlaps,
+      transitionAnalysis.timeline,
+    ).toBe(0);
 
     expect(
       postLoaderAnalysis.postLoaderPosterChanges,
