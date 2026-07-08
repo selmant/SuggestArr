@@ -140,9 +140,9 @@
         </div>
 
         <!-- View: By Content Watched -->
-        <div v-if="showPageLoader" class="loading-initial">
+        <div v-if="showPageLoader" class="loading-initial" data-testid="requests-page-loader">
           <div class="spinner"></div>
-          <p>{{ pageLoaderMessage }}</p>
+          <p data-testid="requests-page-loader-message">{{ pageLoaderMessage }}</p>
         </div>
 
         <template v-else>
@@ -274,7 +274,7 @@
 
           <!-- View: All Requests -->
           <div v-else-if="viewMode === 'all-requests'" key="all-requests">
-            <div class="requests-grid">
+            <div class="requests-grid" data-testid="requests-poster-grid">
               <RequestPosterCard
                 v-for="request in filteredAndSortedRequests" 
                 :key="request.request_id"

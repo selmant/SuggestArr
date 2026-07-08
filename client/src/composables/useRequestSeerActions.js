@@ -387,7 +387,7 @@ export function useRequestSeerActions() {
     }, POSTER_FLUSH_MS);
   }
 
-  async function flushPosterSeerQueue({ silent = false } = {}) {
+  async function flushPosterSeerQueue({ silent = false, drainMode = false } = {}) {
     const allPending = [...queuedPosterItems.values()];
     const pending = allPending.slice(0, POSTER_BATCH_SIZE);
     const overflow = allPending.slice(POSTER_BATCH_SIZE);
@@ -396,7 +396,7 @@ export function useRequestSeerActions() {
       queuedPosterItems.set(seerRequestKey(item), item);
     }
     if (!pending.length) {
-      if (queuedPosterItems.size > 0) {
+      if (queuedPosterItems.size > 0 && !drainMode) {
         schedulePosterSeerFlush();
       }
       return;
@@ -410,7 +410,7 @@ export function useRequestSeerActions() {
     } finally {
       batchPrefetchPromise = null;
     }
-    if (queuedPosterItems.size > 0) {
+    if (queuedPosterItems.size > 0 && !drainMode) {
       schedulePosterSeerFlush();
     }
   }
@@ -436,15 +436,13 @@ export function useRequestSeerActions() {
   }
 
   async function drainPosterSeerQueue({ silent = false } = {}) {
-    await flushPosterSeerQueue({ silent });
     if (posterFlushTimer) {
-      await new Promise((resolve) => setTimeout(resolve, POSTER_FLUSH_MS + 20));
+      clearTimeout(posterFlushTimer);
+      posterFlushTimer = null;
     }
-    if (batchPrefetchPromise) {
-      await batchPrefetchPromise;
-    }
-    if (queuedPosterItems.size > 0 || posterFlushTimer) {
-      await drainPosterSeerQueue({ silent });
+
+    while (queuedPosterItems.size > 0 || batchPrefetchPromise) {
+      await flushPosterSeerQueue({ silent, drainMode: true });
     }
   }
 

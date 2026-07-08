@@ -35,7 +35,6 @@ export function useRequestTraktActions() {
   const traktActionLoadingByRequest = ref({});
   const traktStatusErrorByRequest = ref({});
 
-  const batchPrefetchByUser = new Map();
   let batchPrefetchPromise = null;
   const queuedPosterItems = new Map();
   let posterFlushTimer = null;
@@ -481,7 +480,7 @@ export function useRequestTraktActions() {
     }, POSTER_FLUSH_MS);
   }
 
-  async function flushPosterTraktQueue({ silent = false } = {}) {
+  async function flushPosterTraktQueue({ silent = false, drainMode = false } = {}) {
     const pending = [...queuedPosterItems.values()];
     queuedPosterItems.clear();
     if (!pending.length) {
@@ -531,7 +530,7 @@ export function useRequestTraktActions() {
       batchPrefetchPromise = null;
     }
 
-    if (queuedPosterItems.size > 0) {
+    if (queuedPosterItems.size > 0 && !drainMode) {
       schedulePosterTraktFlush();
     }
   }
@@ -557,15 +556,13 @@ export function useRequestTraktActions() {
   }
 
   async function drainPosterTraktQueue({ silent = false } = {}) {
-    await flushPosterTraktQueue({ silent });
     if (posterFlushTimer) {
-      await new Promise((resolve) => setTimeout(resolve, POSTER_FLUSH_MS + 20));
+      clearTimeout(posterFlushTimer);
+      posterFlushTimer = null;
     }
-    if (batchPrefetchPromise) {
-      await batchPrefetchPromise;
-    }
-    if (queuedPosterItems.size > 0 || posterFlushTimer) {
-      await drainPosterTraktQueue({ silent });
+
+    while (queuedPosterItems.size > 0 || batchPrefetchPromise) {
+      await flushPosterTraktQueue({ silent, drainMode: true });
     }
   }
 
@@ -703,6 +700,7 @@ export function useRequestTraktActions() {
     setTraktWatchedFor,
     rateRequestOnTraktFor,
     prefetchPosterTraktStatuses,
+    prefetchPosterTraktStatusesAsync,
     queuePosterTraktStatus,
     posterTraktProps,
     applyTraktStatus,

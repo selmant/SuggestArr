@@ -2,6 +2,7 @@ const { defineConfig, devices } = require('@playwright/test');
 
 const port = process.env.PLAYWRIGHT_PORT || '8080';
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${port}`;
+const useExternalBaseUrl = Boolean(process.env.PLAYWRIGHT_BASE_URL);
 
 module.exports = defineConfig({
   testDir: './e2e',
@@ -21,10 +22,12 @@ module.exports = defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'npm run serve -- --port ' + port,
-    url: baseURL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  ...(useExternalBaseUrl ? {} : {
+    webServer: {
+      command: 'npm run serve -- --port ' + port,
+      url: baseURL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  }),
 });
