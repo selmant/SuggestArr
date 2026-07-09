@@ -417,39 +417,33 @@ export default {
 .poster-overlay--bottom {
   right: var(--spacing-sm);
   left: var(--spacing-sm);
-  bottom: 4.25rem;
+  bottom: 0.5rem;
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: var(--spacing-xs);
   z-index: 5;
 }
 
-.request-card-poster--with-trakt .poster-overlay--bottom {
-  bottom: 5.75rem;
-}
-
+.request-card-poster--with-trakt .poster-overlay--bottom,
 .request-card-poster--with-seer .poster-overlay--bottom {
-  bottom: 7.25rem;
+  bottom: 3.15rem;
 }
 
 .request-card-poster--with-trakt-and-seer .poster-overlay--bottom {
-  bottom: 10.5rem;
+  bottom: 6.5rem;
 }
 
 .request-card--compact .poster-overlay--bottom {
-  bottom: 3.35rem;
+  bottom: 0.35rem;
 }
 
-.request-card--compact .request-card-poster--with-trakt .poster-overlay--bottom {
-  bottom: 4.5rem;
-}
-
+.request-card--compact .request-card-poster--with-trakt .poster-overlay--bottom,
 .request-card--compact .request-card-poster--with-seer .poster-overlay--bottom {
-  bottom: 5.85rem;
+  bottom: 2.35rem;
 }
 
 .request-card--compact .request-card-poster--with-trakt-and-seer .poster-overlay--bottom {
-  bottom: 8.25rem;
+  bottom: 5.65rem;
 }
 
 .poster-pill,
