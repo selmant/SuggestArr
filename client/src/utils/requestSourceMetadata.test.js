@@ -12,6 +12,11 @@ test('getRequestMethodMetadata resolves real automation methods', () => {
     shortLabel: 'Discover',
     icon: 'fas fa-search',
   });
+  assert.deepEqual(getRequestMethodMetadata({ tmdb_source_id: 'trakt_list' }), {
+    label: 'Trakt List',
+    shortLabel: 'Trakt List',
+    icon: 'icon-trakt',
+  });
   assert.deepEqual(getRequestMethodMetadata({ source_id: 'trakt_recommendations' }), {
     label: 'Trakt Recommendations',
     shortLabel: 'Trakt',

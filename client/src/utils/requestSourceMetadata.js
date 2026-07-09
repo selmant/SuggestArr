@@ -29,7 +29,7 @@ const METHOD_METADATA = {
 const SYNTHETIC_SOURCE_IDS = new Set(Object.keys(METHOD_METADATA));
 
 function getSourceId(item) {
-  return String(item?.source_id ?? item?.id ?? '');
+  return String(item?.source_id ?? item?.tmdb_source_id ?? item?.id ?? '');
 }
 
 export function getRequestMethodMetadata(item, options = {}) {

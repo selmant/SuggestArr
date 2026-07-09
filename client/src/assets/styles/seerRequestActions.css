@@ -279,20 +279,28 @@
   padding: 0.18rem;
 }
 
+.request-card-poster--with-trakt .poster-overlay--bottom {
+  bottom: 5.75rem;
+}
+
 .request-card-poster--with-seer .poster-overlay--bottom {
-  bottom: 6.75rem;
+  bottom: 7.25rem;
+}
+
+.request-card--compact .request-card-poster--with-trakt .poster-overlay--bottom {
+  bottom: 4.5rem;
 }
 
 .request-card--compact .request-card-poster--with-seer .poster-overlay--bottom {
-  bottom: 5.35rem;
+  bottom: 5.85rem;
 }
 
 .request-card-poster--with-trakt-and-seer .poster-overlay--bottom {
-  bottom: 9.25rem;
+  bottom: 10.5rem;
 }
 
 .request-card--compact .request-card-poster--with-trakt-and-seer .poster-overlay--bottom {
-  bottom: 7.35rem;
+  bottom: 8.25rem;
 }
 
 @media (max-width: 768px) {

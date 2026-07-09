@@ -245,7 +245,8 @@ export default {
     },
     posterDockClasses() {
       return {
-        'request-card-poster--with-seer': this.showSeerActions,
+        'request-card-poster--with-trakt': this.showTraktActions && !this.showSeerActions,
+        'request-card-poster--with-seer': this.showSeerActions && !this.showTraktActions,
         'request-card-poster--with-trakt-and-seer': this.showSeerActions && this.showTraktActions,
       };
     },
@@ -420,10 +421,35 @@ export default {
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: var(--spacing-xs);
+  z-index: 5;
+}
+
+.request-card-poster--with-trakt .poster-overlay--bottom {
+  bottom: 5.75rem;
+}
+
+.request-card-poster--with-seer .poster-overlay--bottom {
+  bottom: 7.25rem;
+}
+
+.request-card-poster--with-trakt-and-seer .poster-overlay--bottom {
+  bottom: 10.5rem;
 }
 
 .request-card--compact .poster-overlay--bottom {
   bottom: 3.35rem;
+}
+
+.request-card--compact .request-card-poster--with-trakt .poster-overlay--bottom {
+  bottom: 4.5rem;
+}
+
+.request-card--compact .request-card-poster--with-seer .poster-overlay--bottom {
+  bottom: 5.85rem;
+}
+
+.request-card--compact .request-card-poster--with-trakt-and-seer .poster-overlay--bottom {
+  bottom: 8.25rem;
 }
 
 .poster-pill,

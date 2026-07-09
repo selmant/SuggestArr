@@ -222,7 +222,11 @@
                         v-for="request in source.requests" 
                         :key="request.request_id"
                         class="request-item"
-                        @click="openModal(request)">
+                        @click="openModal({
+                          ...request,
+                          source_id: source.id,
+                          source_title: source.title,
+                        })">
                         <img 
                           v-if="request.poster_path" 
                           :src="request.poster_path" 
@@ -795,7 +799,7 @@ export default {
         seer_status: request.seer_status,
         seer_request_status: request.seer_request_status,
         seer_media_status: request.seer_media_status,
-        source_id: request.source_id,
+        source_id: request.source_id ?? request.tmdb_source_id ?? null,
         source_title: request.source_title,
         source_poster_path: request.source_poster_path,
         source_backdrop_path: request.source_backdrop_path,
