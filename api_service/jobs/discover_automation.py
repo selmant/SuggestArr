@@ -220,10 +220,25 @@ class DiscoverAutomation:
 
         self.logger.debug(f"Fetching {media_type} with filters: {filters}")
 
+        async def is_requestable(item: Dict[str, Any]) -> bool:
+            """Keep scanning TMDb until the requested quota is requestable."""
+            tmdb_id = item['id']
+            if self.db_manager.check_request_exists(media_type, str(tmdb_id)):
+                return False
+            if await self.seer_client.check_already_downloaded(tmdb_id, media_type):
+                return False
+            if await self.seer_client.check_already_requested(tmdb_id, media_type):
+                return False
+            return True
+
         if media_type == 'movie':
-            return await self.tmdb_discover.discover_movies(filters, max_results)
+            return await self.tmdb_discover.discover_movies(
+                filters, max_results, result_filter=is_requestable
+            )
         else:
-            return await self.tmdb_discover.discover_tv(filters, max_results)
+            return await self.tmdb_discover.discover_tv(
+                filters, max_results, result_filter=is_requestable
+            )
 
     async def filter_and_request(
         self, results: List[Dict[str, Any]], dry_run: bool = False

@@ -4,7 +4,7 @@ Provides functionality to discover movies and TV shows using various filter crit
 """
 import aiohttp
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from api_service.config.logger_manager import LoggerManager
 from api_service.services.filter_normalization import build_tmdb_params, normalize_filters
@@ -55,7 +55,8 @@ class TMDbDiscover:
     async def discover_movies(
         self,
         filters: Dict[str, Any],
-        max_results: int = 20
+        max_results: int = 20,
+        result_filter: Optional[Callable[[Dict[str, Any]], Awaitable[bool]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Discover movies using the TMDb Discover API with filters.
@@ -69,12 +70,15 @@ class TMDbDiscover:
         """
         normalized_filters = normalize_filters(filters)
         self.logger.debug(f"Discovering movies with normalized filters: {normalized_filters}")
-        return await self._discover('movie', {**(filters or {}), **normalized_filters}, max_results)
+        return await self._discover(
+            'movie', {**(filters or {}), **normalized_filters}, max_results, result_filter
+        )
 
     async def discover_tv(
         self,
         filters: Dict[str, Any],
-        max_results: int = 20
+        max_results: int = 20,
+        result_filter: Optional[Callable[[Dict[str, Any]], Awaitable[bool]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Discover TV shows using the TMDb Discover API with filters.
@@ -88,13 +92,16 @@ class TMDbDiscover:
         """
         normalized_filters = normalize_filters(filters)
         self.logger.debug(f"Discovering TV shows with normalized filters: {normalized_filters}")
-        return await self._discover('tv', {**(filters or {}), **normalized_filters}, max_results)
+        return await self._discover(
+            'tv', {**(filters or {}), **normalized_filters}, max_results, result_filter
+        )
 
     async def _discover(
         self,
         media_type: str,
         filters: Dict[str, Any],
-        max_results: int
+        max_results: int,
+        result_filter: Optional[Callable[[Dict[str, Any]], Awaitable[bool]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Internal method to perform discover API calls.
@@ -139,7 +146,11 @@ class TMDbDiscover:
 
             return self._format_result(item, media_type)
 
-        for page in range(1, pages_needed + 1):
+        # With a requestability filter, max_results is the number of usable
+        # results desired, so keep paging until that quota is filled or TMDb
+        # runs out of pages. Without one, preserve the normal raw-result cap.
+        max_pages = 500 if result_filter is not None else pages_needed
+        for page in range(1, max_pages + 1):
             self.logger.debug(f"Fetching discover page {page} for {media_type}")
 
             data = await self._fetch_discover_page(media_type, filters, page)
@@ -155,6 +166,9 @@ class TMDbDiscover:
 
                 for res in batch_results:
                     if res is not None:
+                        if result_filter is not None and not await result_filter(res):
+                            continue
+
                         results.append(res)
                         if len(results) >= max_results:
                             break
@@ -170,7 +184,9 @@ class TMDbDiscover:
                 break
 
             # Rate limit delay
-            if page < pages_needed:
+            if result_filter is None and page < pages_needed:
+                await asyncio.sleep(RATE_LIMIT_SLEEP)
+            elif result_filter is not None and page < data.get('total_pages', 1):
                 await asyncio.sleep(RATE_LIMIT_SLEEP)
 
         self.logger.info(f"Discovered {len(results)} {media_type} items")

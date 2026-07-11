@@ -295,6 +295,25 @@ class TestDiscoverMoviesAndTv(unittest.IsolatedAsyncioTestCase):
             result = await disc.discover_movies({}, max_results=5)
         self.assertLessEqual(len(result), 5)
 
+    async def test_result_filter_pages_until_requestable_quota_is_filled(self):
+        disc = _make_discover()
+        first_page = {'results': [_RAW_MOVIE], 'total_pages': 2}
+        second_item = {**_RAW_MOVIE, 'id': 102, 'title': 'Second Movie'}
+        second_page = {'results': [second_item], 'total_pages': 2}
+        fetch = AsyncMock(side_effect=[first_page, second_page])
+
+        async def only_second(item):
+            return item['id'] == 102
+
+        with patch.object(disc, '_fetch_discover_page', fetch), \
+             patch('asyncio.sleep', AsyncMock()):
+            result = await disc.discover_movies(
+                {}, max_results=1, result_filter=only_second
+            )
+
+        self.assertEqual([item['id'] for item in result], [102])
+        self.assertEqual(fetch.await_count, 2)
+
     async def test_stops_when_page_returns_none(self):
         disc = _make_discover()
         with patch.object(disc, '_fetch_discover_page', AsyncMock(return_value=None)), \
