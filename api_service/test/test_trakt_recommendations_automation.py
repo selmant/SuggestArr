@@ -31,10 +31,10 @@ async def test_fetch_trakt_recommendations_applies_max_results():
 
     results = await automation.fetch_trakt_recommendations()
 
-    assert len(results) == 2
+    assert len(results) == 3
     automation.trakt_client.get_recommendations.assert_awaited_once_with(
         "movie",
-        limit=6,
+        limit=250,
         ignore_collected=True,
         ignore_watched=True,
     )
@@ -101,9 +101,9 @@ async def test_fetch_trakt_recommendations_balances_movie_and_tv_targets():
 
     movie_count = sum(1 for item in results if item["media_type"] == "movie")
     tv_count = sum(1 for item in results if item["media_type"] == "tv")
-    assert len(results) == 30
-    assert movie_count == 15
-    assert tv_count == 15
+    assert len(results) == 40
+    assert movie_count == 20
+    assert tv_count == 20
 
 
 @pytest.mark.asyncio

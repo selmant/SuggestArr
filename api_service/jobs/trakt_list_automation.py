@@ -172,7 +172,8 @@ class TraktListAutomation(TraktJobAutomationBase):
                     await stack.enter_async_context(self.trakt_client)
 
                 results = await self.fetch_list_items()
-            results_count = len(results)
+            request_target = int(self.job_data.get("max_results") or 20)
+            results_count = min(len(results), request_target)
             self.logger.info("Fetched %d Trakt list items after filtering", results_count)
 
             requested_count, dry_run_items = await self.filter_and_request(results, dry_run=dry_run)
@@ -224,6 +225,7 @@ class TraktListAutomation(TraktJobAutomationBase):
         )
 
         filtered: List[Dict[str, Any]] = []
+        candidate_limit = max_results * 3
         collected_keys: set[tuple[str, str]] = set()
         stats = {
             "pages_fetched": 0,
@@ -288,10 +290,10 @@ class TraktListAutomation(TraktJobAutomationBase):
                     stats["kept"] += 1
                 else:
                     stats["failed_quality_filter"] += 1
-                if len(filtered) >= max_results:
+                if len(filtered) >= candidate_limit:
                     break
 
-            if len(filtered) >= max_results:
+            if len(filtered) >= candidate_limit:
                 break
 
         self.logger.info(
@@ -308,7 +310,9 @@ class TraktListAutomation(TraktJobAutomationBase):
             stats["failed_quality_filter"],
             stats["kept"],
         )
-        return filtered[:max_results]
+        # Keep replacement candidates for the request phase. Some can become
+        # duplicates while another job is running, or lose a queue race.
+        return filtered
 
     async def filter_and_request(
         self,
@@ -318,6 +322,7 @@ class TraktListAutomation(TraktJobAutomationBase):
         """Filter list content and request via Seer."""
         requested_count = 0
         dry_run_items: Optional[List[Dict[str, Any]]] = [] if dry_run else None
+        max_requests = int(self.job_data.get("max_results") or 20)
         dedup_mode = str(self.job_data.get("filters", {}).get("dedup_mode") or "global").strip()
         per_list_seen = (
             self.db_manager.get_trakt_list_seen(self.job_id)
@@ -327,6 +332,8 @@ class TraktListAutomation(TraktJobAutomationBase):
         seen_to_record: List[Tuple[str, str]] = []
 
         for item in results:
+            if requested_count >= max_requests:
+                break
             media_type = item.get("media_type") or self.job_data.get("media_type", "movie")
             tmdb_id = item["id"]
             title = item.get("title") or item.get("name") or "Unknown"

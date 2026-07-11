@@ -128,7 +128,8 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
                     await stack.enter_async_context(self.trakt_client)
 
                 results = await self.fetch_trakt_recommendations()
-            results_count = len(results)
+            request_target = int(self.job_data.get("max_results") or 20)
+            results_count = min(len(results), request_target)
             self.logger.info("Fetched %d Trakt recommendations after filtering", results_count)
 
             requested_count, dry_run_items = await self.filter_and_request(results, dry_run=dry_run)
@@ -183,15 +184,15 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
         job_filters = self.job_data.get("filters", {})
         media_type = self.job_data.get("media_type", "movie")
         max_results = int(self.job_data.get("max_results") or 20)
-        fetch_limit = max(max_results * 3, max_results)
-
         ignore_collected = bool(job_filters.get("ignore_collected", True))
         ignore_watched = bool(job_filters.get("ignore_watched", True))
 
         media_types = ["movie", "tv"] if media_type == "both" else [media_type]
         type_targets = self._type_request_targets(max_results, media_types)
         if len(media_types) == 1:
-            per_type_limit = min(TRAKT_RECOMMENDATIONS_LIMIT_MAX, fetch_limit)
+            # Fetch the largest available recommendation pool so skipped or
+            # concurrently claimed items can be replaced later.
+            per_type_limit = TRAKT_RECOMMENDATIONS_LIMIT_MAX
         else:
             # Recommendations do not paginate; request Trakt's max per type.
             per_type_limit = TRAKT_RECOMMENDATIONS_LIMIT_MAX
@@ -219,9 +220,6 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
             raw_items_total += len(trakt_items)
 
             for item in trakt_items:
-                if kept_by_type[item_type] >= type_target:
-                    break
-
                 tmdb_id = item.get("tmdb_id")
                 if not tmdb_id:
                     stats["missing_tmdb_id"] += 1
@@ -256,7 +254,10 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
             stats["failed_quality_filter"],
             kept_by_type,
         )
-        return filtered[:max_results]
+        # Keep the full filtered pool. Requesting happens separately and may
+        # lose candidates to concurrent jobs or queue deduplication; retaining
+        # all candidates lets that phase continue until the quota is filled.
+        return filtered
 
     async def filter_and_request(
         self,
@@ -266,6 +267,13 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
         """Filter discovered content and request via Seer."""
         requested_count = 0
         dry_run_items: Optional[List[Dict[str, Any]]] = [] if dry_run else None
+        media_types = [self.job_data.get("media_type", "movie")]
+        if media_types[0] == "both":
+            media_types = ["movie", "tv"]
+        type_targets = self._type_request_targets(
+            int(self.job_data.get("max_results") or 20), media_types
+        )
+        requested_by_type = {media_type: 0 for media_type in media_types}
 
         for item in results:
             media_type = item.get("media_type") or self.job_data.get("media_type", "movie")
@@ -273,12 +281,16 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
             title = item.get("title") or item.get("name") or "Unknown"
 
             try:
+                if requested_by_type.get(media_type, 0) >= type_targets.get(media_type, 0):
+                    continue
+
                 if await self._should_skip_global_request(media_type, tmdb_id):
                     continue
 
                 if dry_run:
                     dry_run_items.append(self._format_dry_run_item(media_type, item))
                     requested_count += 1
+                    requested_by_type[media_type] += 1
                     continue
 
                 success = await self.seer_client.request_media(
@@ -290,6 +302,7 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
                 )
                 if success:
                     requested_count += 1
+                    requested_by_type[media_type] += 1
             except Exception as exc:
                 self.logger.error("Error processing %s: %s", title, exc)
                 continue

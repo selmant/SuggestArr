@@ -203,5 +203,5 @@ async def test_fetch_list_items_paginates_past_already_requested_items():
 
     assert len(results) == 1
     assert results[0]["id"] == 2
-    assert automation.trakt_client.get_list_items.await_count == 2
+    assert automation.trakt_client.get_list_items.await_count == 3
     automation._enrich_and_filter_item.assert_awaited_once()
