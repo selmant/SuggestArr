@@ -1515,6 +1515,15 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                # A submitted queue row is historical bookkeeping. If its
+                # canonical request was later archived/deleted, allow the
+                # same title to be queued again instead of letting the old
+                # unique queue row block it forever.
+                delete_query = f"""DELETE FROM pending_requests
+                                  WHERE tmdb_id = {placeholder}
+                                    AND media_type = {placeholder}
+                                    AND status IN ('submitted', 'failed')"""
+                cursor.execute(delete_query, (str(tmdb_id), media_type))
                 cursor.execute(query, params)
                 conn.commit()
                 self.logger.debug(
@@ -3418,9 +3427,8 @@ class DatabaseManager:
                         payload: dict) -> bool:
         """Enqueue a Seer submission for background delivery.
 
-        Idempotent: silently no-ops when an entry for (tmdb_id, media_type) already
-        exists in any status.  Items that were already successfully submitted (present
-        in the ``requests`` table) are also skipped.
+        Idempotent for active/in-flight requests. Historical submitted or failed
+        queue rows are recycled when no active request remains.
 
         :param tmdb_id: TMDB media ID.
         :param media_type: 'movie' or 'tv'.
@@ -3440,6 +3448,7 @@ class DatabaseManager:
             VALUES (?, ?, ?, ?, 'queued')
         """
         params = (str(tmdb_id), media_type, user_id, json.dumps(payload))
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
 
         if self.db_type in ['mysql', 'mariadb']:
             query = query.replace("INSERT OR IGNORE", "INSERT IGNORE").replace("?", "%s")
