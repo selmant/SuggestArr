@@ -233,6 +233,7 @@ async def test_filter_and_request_uses_local_content_for_downloaded_check():
     automation.local_content = {"movie": {"27205"}}
     automation.db_manager = MagicMock()
     automation.db_manager.check_request_exists.return_value = False
+    automation.db_manager.check_pending_request_exists.return_value = False
     automation.seer_client = MagicMock()
     automation.seer_client.check_already_downloaded = AsyncMock(return_value=True)
     automation.seer_client.check_already_requested = AsyncMock(return_value=False)
@@ -261,6 +262,7 @@ async def test_filter_and_request_passes_anime_flag_to_seer():
     automation.seer_discovered_ids = set()
     automation.db_manager = MagicMock()
     automation.db_manager.check_request_exists.return_value = False
+    automation.db_manager.check_pending_request_exists.return_value = False
     automation.seer_client = MagicMock()
     automation.seer_client.check_already_downloaded = AsyncMock(return_value=False)
     automation.seer_client.check_already_requested = AsyncMock(return_value=False)

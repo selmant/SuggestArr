@@ -367,6 +367,8 @@ class TraktJobAutomationBase:
         tmdb_id_str = str(tmdb_id)
         if self.db_manager.check_request_exists(media_type, tmdb_id_str):
             return True
+        if self.db_manager.check_pending_request_exists(media_type, tmdb_id_str):
+            return True
         if tmdb_id_str in self.seer_discovered_ids:
             return True
         if await self.seer_client.check_already_downloaded(

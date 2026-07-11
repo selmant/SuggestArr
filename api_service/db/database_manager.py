@@ -1394,6 +1394,18 @@ class DatabaseManager:
             result = cursor.fetchone()
             return result is not None
 
+    def check_pending_request_exists(self, media_type: str, media_id: str) -> bool:
+        """Check whether a media item is already waiting for Seer delivery."""
+        placeholder = '%s' if self.db_type in ['mysql', 'postgres'] else '?'
+        query = f"""SELECT 1 FROM pending_requests
+                    WHERE tmdb_id = {placeholder}
+                      AND media_type = {placeholder}
+                      AND status IN ('queued', 'submitting')"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(media_id), media_type))
+            return cursor.fetchone() is not None
+
     def check_requests_exist_batch(self, media_type: str, media_ids: List[str]) -> Set[str]:
         """Check which of the provided media IDs already have requests in the database.
         
@@ -1763,6 +1775,37 @@ class DatabaseManager:
             AND COALESCE(r.is_active, 1) = 1
         """
 
+    def _requests_seer_status_filter_sql(self, seer_status_filter: str = 'all') -> str:
+        """SQL predicate for stored Seer status filters used by request lists."""
+        normalized = str(seer_status_filter or 'all').strip().lower()
+        status_expr = "COALESCE(r.seer_status, 'not_found')"
+        status_groups = {
+            'unavailable': ('pending', 'approved', 'processing', 'partially_available', 'unavailable'),
+            'processing': ('processing', 'partially_available', 'approved', 'unavailable'),
+        }
+        valid_statuses = {
+            'pending',
+            'approved',
+            'declined',
+            'processing',
+            'partially_available',
+            'available',
+            'unavailable',
+            'failed',
+            'deleted',
+            'completed',
+            'not_found',
+        }
+
+        if normalized == 'all':
+            return "1 = 1"
+        if normalized in status_groups:
+            values = "', '".join(status_groups[normalized])
+            return f"{status_expr} IN ('{values}')"
+        if normalized in valid_statuses:
+            return f"{status_expr} = '{normalized}'"
+        return "1 = 1"
+
     def _requests_archived_filter_sql(self) -> str:
         """WHERE clause for archived automation request list queries."""
         return """
@@ -1895,22 +1938,32 @@ class DatabaseManager:
             "user_id": row[36] if len(row) > 36 else None,
             "user_name": row[37] if len(row) > 37 else None,
             "source_origin": row[38] if len(row) > 38 else None,
+            "seer_status": row[39] if len(row) > 39 else None,
+            "seer_request_status": row[40] if len(row) > 40 else None,
+            "seer_media_status": row[41] if len(row) > 41 else None,
         })
 
-    def get_all_requests_grouped_by_source(self, page: int = 1, per_page: int = 8, sort_by: str = 'date-desc') -> Dict[str, Any]:
+    def get_all_requests_grouped_by_source(
+        self,
+        page: int = 1,
+        per_page: int = 8,
+        sort_by: str = 'date-desc',
+        seer_status_filter: str = 'all',
+    ) -> Dict[str, Any]:
         """Retrieve requests grouped by source with SQL source pagination."""
         self.logger.debug(
-            "Retrieving all requests grouped by source: page=%s, per_page=%s, sort_by=%s",
+            "Retrieving all requests grouped by source: page=%s, per_page=%s, sort_by=%s, seer_status=%s",
             page,
             per_page,
             sort_by,
+            seer_status_filter,
         )
 
         max_requests_per_source = 50
         ph = self._ph()
         from api_service.services.request_sources import request_source_title_sql
         source_title_expr = request_source_title_sql("r")
-        filter_sql = self._requests_list_filter_sql()
+        filter_sql = f"{self._requests_list_filter_sql()} AND {self._requests_seer_status_filter_sql(seer_status_filter)}"
 
         count_query = f"""
             SELECT
@@ -2007,7 +2060,8 @@ class DatabaseManager:
                 m.metacritic_rating AS request_metacritic_rating,
                 m.trakt_rating AS request_trakt_rating, m.trakt_votes AS request_trakt_votes,
                 m.logo_path, m.backdrop_path, r.is_anime, r.rationale,
-                r.user_id, u.user_name, r.source_origin
+                r.user_id, u.user_name, r.source_origin,
+                r.seer_status, r.seer_request_status, r.seer_media_status
             FROM (
                 SELECT
                     r.*,
@@ -2067,10 +2121,11 @@ class DatabaseManager:
         page: int = 1,
         per_page: int = 50,
         sort_by: str = 'date-desc',
+        seer_status_filter: str = 'all',
     ) -> Dict[str, Any]:
         """Paginate requests belonging to one source group."""
         ph = self._ph()
-        filter_sql = self._requests_list_filter_sql()
+        filter_sql = f"{self._requests_list_filter_sql()} AND {self._requests_seer_status_filter_sql(seer_status_filter)}"
         order_by_clause = self._requests_detail_order_sql(sort_by)
 
         count_query = f"""
@@ -2102,7 +2157,8 @@ class DatabaseManager:
                 m.metacritic_rating AS request_metacritic_rating,
                 m.trakt_rating AS request_trakt_rating, m.trakt_votes AS request_trakt_votes,
                 m.logo_path, m.backdrop_path, r.is_anime, r.rationale,
-                r.user_id, u.user_name, r.source_origin
+                r.user_id, u.user_name, r.source_origin,
+                r.seer_status, r.seer_request_status, r.seer_media_status
             FROM requests r
             JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
             LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
@@ -2148,10 +2204,11 @@ class DatabaseManager:
         page: int = 1,
         per_page: int = 24,
         sort_by: str = 'date-desc',
+        seer_status_filter: str = 'all',
     ) -> Dict[str, Any]:
         """Return individual automation requests with SQL pagination."""
         ph = self._ph()
-        filter_sql = self._requests_list_filter_sql()
+        filter_sql = f"{self._requests_list_filter_sql()} AND {self._requests_seer_status_filter_sql(seer_status_filter)}"
         order_by_clause = self._requests_flat_order_sql(sort_by)
         from api_service.services.request_sources import request_source_title_sql
         source_title_expr = request_source_title_sql("r")

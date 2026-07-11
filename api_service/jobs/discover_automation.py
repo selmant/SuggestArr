@@ -225,6 +225,8 @@ class DiscoverAutomation:
             tmdb_id = item['id']
             if self.db_manager.check_request_exists(media_type, str(tmdb_id)):
                 return False
+            if self.db_manager.check_pending_request_exists(media_type, str(tmdb_id)):
+                return False
             if await self.seer_client.check_already_downloaded(tmdb_id, media_type):
                 return False
             if await self.seer_client.check_already_requested(tmdb_id, media_type):
