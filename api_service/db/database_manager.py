@@ -1406,6 +1406,26 @@ class DatabaseManager:
             cursor.execute(query, (str(media_id), media_type))
             return cursor.fetchone() is not None
 
+    def reconcile_seer_requests(self, live_keys: Set[tuple[str, str]]) -> int:
+        """Archive local SuggestArr rows that no longer exist in Seer."""
+        placeholder = '%s' if self.db_type in ('mysql', 'postgres') else '?'
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT tmdb_request_id, media_type FROM requests "
+                "WHERE requested_by = 'SuggestArr' AND COALESCE(is_active, 1) = 1"
+            )
+            stale = [row for row in cursor.fetchall() if (str(row[0]), row[1]) not in live_keys]
+            if stale:
+                cursor.executemany(
+                    f"UPDATE requests SET is_active = {placeholder}, archived_at = CURRENT_TIMESTAMP, "
+                    f"archive_reason = {placeholder} WHERE tmdb_request_id = {placeholder} "
+                    f"AND media_type = {placeholder} AND requested_by = 'SuggestArr'",
+                    [(0, 'missing_from_seer', str(media_id), media_type) for media_id, media_type in stale],
+                )
+                conn.commit()
+            return len(stale)
+
     def check_requests_exist_batch(self, media_type: str, media_ids: List[str]) -> Set[str]:
         """Check which of the provided media IDs already have requests in the database.
         
@@ -1515,15 +1535,6 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                # A submitted queue row is historical bookkeeping. If its
-                # canonical request was later archived/deleted, allow the
-                # same title to be queued again instead of letting the old
-                # unique queue row block it forever.
-                delete_query = f"""DELETE FROM pending_requests
-                                  WHERE tmdb_id = {placeholder}
-                                    AND media_type = {placeholder}
-                                    AND status IN ('submitted', 'failed')"""
-                cursor.execute(delete_query, (str(tmdb_id), media_type))
                 cursor.execute(query, params)
                 conn.commit()
                 self.logger.debug(
@@ -3459,6 +3470,15 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                # A submitted queue row is historical bookkeeping. If its
+                # canonical request was later archived/deleted, allow the
+                # same title to be queued again instead of letting the old
+                # unique queue row block it forever.
+                delete_query = f"""DELETE FROM pending_requests
+                                  WHERE tmdb_id = {placeholder}
+                                    AND media_type = {placeholder}
+                                    AND status IN ('submitted', 'failed')"""
+                cursor.execute(delete_query, (str(tmdb_id), media_type))
                 cursor.execute(query, params)
                 inserted = cursor.rowcount > 0
                 conn.commit()

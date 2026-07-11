@@ -186,7 +186,10 @@ class SeerClient(BaseHTTPClient):
         total_requests = await self.get_total_request()
         self.logger.debug("Total requests to fetch: %d", total_requests)
         tasks = [self._fetch_batch(skip) for skip in range(0, total_requests, BATCH_SIZE)]
-        await asyncio.gather(*tasks)
+        batches = await asyncio.gather(*tasks)
+        if all(batch is not None for batch in batches):
+            live_keys = set().union(*batches) if batches else set()
+            DatabaseManager().reconcile_seer_requests(live_keys)
         self.logger.info("Fetched all requests and saved to database.")
 
     async def _fetch_batch(self, skip):
@@ -197,8 +200,15 @@ class SeerClient(BaseHTTPClient):
             if data:
                 requests = data.get('results', [])
                 DatabaseManager().save_requests_batch(requests)
+                return {
+                    (str((request.get('media') or {}).get('tmdbId')), (request.get('media') or {}).get('mediaType'))
+                    for request in requests
+                    if (request.get('media') or {}).get('tmdbId') is not None
+                    and (request.get('media') or {}).get('mediaType')
+                }
         except Exception as e:
             self.logger.error(f"Failed to fetch batch at skip {skip}: {e}")
+        return None
 
     async def get_total_request(self):
         """Get total requests made in the Seer service."""
