@@ -60,6 +60,22 @@ def test_flat_requests_use_sql_limit_and_offset(tmp_path):
     assert page_one["data"][0]["request_id"] != page_two["data"][0]["request_id"]
 
 
+def test_request_count_matches_search_across_all_pages(tmp_path):
+    patches = _sqlite_db(tmp_path)
+    with patches[0], patches[1]:
+        DatabaseManager._instance = None
+        db = DatabaseManager()
+        for media_id, title in (("1", "The Matrix"), ("2", "Matrix Reloaded"), ("3", "Alien")):
+            db.save_metadata({"id": media_id, "title": title}, "movie")
+            db.save_request("movie", media_id, DISCOVER_SOURCE)
+
+        count = db.count_requests(search="matrix")
+
+    DatabaseManager._instance = None
+
+    assert count == 2
+
+
 def test_flat_requests_sort_oldest_first(tmp_path):
     patches = _sqlite_db(tmp_path)
     with patches[0], patches[1]:
@@ -76,6 +92,53 @@ def test_flat_requests_sort_oldest_first(tmp_path):
 
     assert result["data"][0]["request_id"] == "older"
     assert result["data"][1]["request_id"] == "newer"
+
+
+def test_flat_requests_filter_by_stored_seer_status(tmp_path):
+    patches = _sqlite_db(tmp_path)
+    with patches[0], patches[1]:
+        DatabaseManager._instance = None
+        db = DatabaseManager()
+        db.save_metadata({"id": "pending-id", "title": "Pending"}, "movie")
+        db.save_metadata({"id": "declined-id", "title": "Declined"}, "movie")
+        db.save_request("movie", "pending-id", DISCOVER_SOURCE)
+        db.save_request("movie", "declined-id", DISCOVER_SOURCE)
+        db.update_request_seer_state("pending-id", "movie", seer_status="pending")
+        db.update_request_seer_state("declined-id", "movie", seer_status="declined")
+
+        result = db.get_all_requests_flat(page=1, per_page=10, seer_status_filter="pending")
+
+    DatabaseManager._instance = None
+
+    assert result["total"] == 1
+    assert result["data"][0]["request_id"] == "pending-id"
+    assert result["data"][0]["seer_status"] == "pending"
+
+
+def test_grouped_requests_filter_by_seer_status_bucket(tmp_path):
+    patches = _sqlite_db(tmp_path)
+    with patches[0], patches[1]:
+        DatabaseManager._instance = None
+        db = DatabaseManager()
+        db.save_metadata({"id": "source", "title": "Source"}, "movie")
+        db.save_metadata({"id": "approved-id", "title": "Approved"}, "movie")
+        db.save_metadata({"id": "available-id", "title": "Available"}, "movie")
+        db.save_request("movie", "approved-id", "source")
+        db.save_request("movie", "available-id", "source")
+        db.update_request_seer_state("approved-id", "movie", seer_status="approved")
+        db.update_request_seer_state("available-id", "movie", seer_status="available")
+
+        result = db.get_all_requests_grouped_by_source(
+            page=1,
+            per_page=10,
+            seer_status_filter="unavailable",
+        )
+
+    DatabaseManager._instance = None
+
+    assert result["total_requests"] == 1
+    assert result["data"][0]["requests"][0]["request_id"] == "approved-id"
+    assert result["data"][0]["requests"][0]["seer_status"] == "approved"
 
 
 def test_get_requests_for_source_paginates(tmp_path):

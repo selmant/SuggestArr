@@ -107,9 +107,15 @@ export const getAiSearchRequests = (page = 1, perPage = 12, sortBy = 'date-desc'
     });
 };
 
-export const getAutomationRequestsFlat = (page = 1, perPage = 24, sortBy = 'date-desc') => {
+export const getAutomationRequestsFlat = (page = 1, perPage = 24, sortBy = 'date-desc', seerStatus = 'all') => {
     return axios.get('/api/automation/requests/flat', {
-        params: { page, per_page: perPage, sort_by: sortBy },
+        params: { page, per_page: perPage, sort_by: sortBy, seer_status: seerStatus },
+    });
+};
+
+export const getAutomationRequestsCount = (search = '', mediaType = 'all', seerStatus = 'all') => {
+    return axios.get('/api/automation/requests/count', {
+        params: { search, media_type: mediaType, seer_status: seerStatus },
     });
 };
 
@@ -119,9 +125,9 @@ export const getArchivedRequests = (page = 1, perPage = 24, sortBy = 'date-desc'
     });
 };
 
-export const getAutomationRequestsBySource = (sourceId, page = 1, perPage = 50, sortBy = 'date-desc') => {
+export const getAutomationRequestsBySource = (sourceId, page = 1, perPage = 50, sortBy = 'date-desc', seerStatus = 'all') => {
     return axios.get(`/api/automation/requests/source/${encodeURIComponent(sourceId)}`, {
-        params: { page, per_page: perPage, sort_by: sortBy },
+        params: { page, per_page: perPage, sort_by: sortBy, seer_status: seerStatus },
     });
 };
 

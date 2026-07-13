@@ -2319,6 +2319,45 @@ class DatabaseManager:
             "per_page": per_page,
         }
 
+    def count_requests(
+        self,
+        search: str = "",
+        media_type: str = "all",
+        seer_status_filter: str = "all",
+    ) -> int:
+        """Count active requests matching the Requests-page filters."""
+        ph = self._ph()
+        from api_service.services.request_sources import request_source_title_sql
+
+        conditions = [
+            self._requests_list_filter_sql(),
+            self._requests_seer_status_filter_sql(seer_status_filter),
+        ]
+        params = []
+        if media_type in ("movie", "tv"):
+            conditions.append(f"r.media_type = {ph}")
+            params.append(media_type)
+        query_text = str(search or "").strip().lower()
+        if query_text:
+            source_title_expr = request_source_title_sql("r")
+            conditions.append(
+                f"(LOWER(m.title) LIKE {ph} OR LOWER({source_title_expr}) LIKE {ph})"
+            )
+            pattern = f"%{query_text}%"
+            params.extend([pattern, pattern])
+
+        query = f"""
+            SELECT COUNT(*)
+            FROM requests r
+            JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
+            LEFT JOIN metadata s ON r.tmdb_source_id = s.media_id
+            WHERE {' AND '.join(conditions)}
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, tuple(params))
+            return int((cursor.fetchone() or [0])[0])
+
     def get_requested_tmdb_ids(self) -> set:
         """Return the set of TMDB IDs (as strings) that SuggestArr has already requested.
 

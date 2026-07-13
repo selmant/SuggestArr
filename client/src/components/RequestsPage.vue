@@ -438,6 +438,7 @@ import { getRatingBadgeSettings } from '@/utils/ratingBadgeConfig.js';
 import {
   getAiSearchRequests,
   getAutomationRequestsFlat,
+  getAutomationRequestsCount,
   getAutomationRequestsBySource,
   getArchivedRequests,
 } from '@/api/api.js';
@@ -476,6 +477,9 @@ export default {
       flatPerPage: 24,
       viewMode: 'all-requests',
       searchQuery: "",
+      searchResultCount: null,
+      searchCountRequestToken: 0,
+      searchCountTimer: null,
       sortBy: 'date-desc',
       mediaTypeFilter: 'all',
       seerStatusFilter: 'all',
@@ -490,6 +494,8 @@ export default {
       totalPages: 1,
       observer: null,
       retryTimeout: null,
+      requestStatusRefreshTimer: null,
+      requestStatusRefreshInterval: null,
       totalSourcesCount: 0,
       totalRequestsCount: 0,
       // AI Requests state
@@ -528,6 +534,9 @@ export default {
     },
 
     activeFilteredCount() {
+      if (this.searchQuery && this.searchResultCount !== null) {
+        return this.searchResultCount;
+      }
       if (this.viewMode === 'by-content') {
         return this.filteredAndSortedSources.length;
       }
@@ -662,13 +671,10 @@ export default {
     },
 
     showPageLoader() {
-      return this.showInitialLoader || this.filterIntegrationLoading;
+      return this.showInitialLoader;
     },
 
     pageLoaderMessage() {
-      if (this.filterIntegrationLoading) {
-        return 'Applying Seer filter...';
-      }
       return 'Loading your requests...';
     },
 
@@ -734,6 +740,7 @@ export default {
     },
     
     mediaTypeFilter() {
+      this.fetchSearchResultCount();
       this.reinitObserverAfterFilter();
     },
 
@@ -742,18 +749,19 @@ export default {
         return;
       }
 
-      if (newValue === 'all') {
-        this.appliedSeerStatusFilter = 'all';
-        this.filterIntegrationLoading = false;
-        this.reinitObserverAfterFilter();
+      this.appliedSeerStatusFilter = newValue || 'all';
+      this.filterIntegrationLoading = false;
+      this.fetchSearchResultCount();
+
+      if (this.viewMode === 'archived' || this.viewMode === 'ai-requests') {
         return;
       }
 
-      this.filterIntegrationLoading = true;
-      void this.refreshSeerFilterStatuses();
+      this.resetAndReload();
     },
     
     searchQuery() {
+      this.fetchSearchResultCount();
       this.$nextTick(() => {
         this.initObserver();
       });
@@ -859,8 +867,7 @@ export default {
         return false;
       }
 
-      const status = this.getSeerStatus(request)?.seer_status || request?.seer_status;
-      return matchesSeerStatusFilter(status, this.appliedSeerStatusFilter);
+      return matchesSeerStatusFilter(request?.seer_status, this.appliedSeerStatusFilter);
     },
 
     loadedRequestsForFilters() {
@@ -871,6 +878,50 @@ export default {
         return this.allRequestsFlat;
       }
       return [];
+    },
+
+    getVisibleRequestsForStatusRefresh() {
+      if (this.viewMode === 'all-requests') {
+        return this.flatRequests;
+      }
+      if (this.viewMode === 'by-content') {
+        return this.allRequestsFlat;
+      }
+      if (this.viewMode === 'ai-requests') {
+        return this.aiRequests;
+      }
+      return [];
+    },
+
+    scheduleBackgroundStatusRefresh(delayMs = 1500) {
+      if (this.requestStatusRefreshTimer) {
+        clearTimeout(this.requestStatusRefreshTimer);
+      }
+      this.requestStatusRefreshTimer = setTimeout(() => {
+        this.requestStatusRefreshTimer = null;
+        void this.refreshVisibleRequestStatuses();
+      }, delayMs);
+    },
+
+    startBackgroundStatusRefreshInterval() {
+      if (this.requestStatusRefreshInterval) {
+        clearInterval(this.requestStatusRefreshInterval);
+      }
+      this.requestStatusRefreshInterval = setInterval(() => {
+        void this.refreshVisibleRequestStatuses();
+      }, 60 * 1000);
+    },
+
+    async refreshVisibleRequestStatuses() {
+      const requests = this.getVisibleRequestsForStatusRefresh();
+      if (!requests.length) {
+        return;
+      }
+      await this.prefetchRequestIntegrationStatusesAsync(requests, {
+        forceTrakt: false,
+        forceSeer: false,
+        prefetchSeer: this.appliedSeerStatusFilter === 'all',
+      });
     },
 
     async refreshSeerFilterStatuses() {
@@ -939,16 +990,14 @@ export default {
       this.retryCount = 0;
 
       if (this.viewMode === 'all-requests') {
-        this.flatRequests = [];
         this.flatCurrentPage = 0;
-        this.flatTotalPages = 1;
+        this.flatTotalPages = 0;
         this.fetchFlatRequests(1);
         return;
       }
 
-      this.sources = [];
       this.currentPage = 0;
-      this.totalPages = 1;
+      this.totalPages = 0;
       this.fetchRequests(1);
     },
 
@@ -982,6 +1031,7 @@ export default {
             page,
             perPage,
             this.sortBy,
+            this.appliedSeerStatusFilter,
           );
           const extraRequests = response.data?.data?.requests || [];
           source.requests = [
@@ -1124,6 +1174,33 @@ export default {
       this.appliedSeerStatusFilter = 'all';
       this.filterIntegrationLoading = false;
       this.searchQuery = '';
+      this.searchResultCount = null;
+    },
+
+    fetchSearchResultCount() {
+      if (this.searchCountTimer) {
+        clearTimeout(this.searchCountTimer);
+      }
+      if (!this.searchQuery.trim() && this.mediaTypeFilter === 'all' && this.appliedSeerStatusFilter === 'all') {
+        this.searchResultCount = null;
+        return;
+      }
+
+      const token = ++this.searchCountRequestToken;
+      this.searchCountTimer = setTimeout(async () => {
+        try {
+          const response = await getAutomationRequestsCount(
+            this.searchQuery,
+            this.mediaTypeFilter,
+            this.appliedSeerStatusFilter,
+          );
+          if (token === this.searchCountRequestToken) {
+            this.searchResultCount = Number(response.data?.count || 0);
+          }
+        } catch (error) {
+          console.warn('Could not fetch search result count:', error);
+        }
+      }, 250);
     },
 
 
@@ -1200,28 +1277,35 @@ export default {
 
       this.loading = true;
       try {
-        const response = await getAutomationRequestsFlat(page, this.flatPerPage, this.sortBy);
+        const response = await getAutomationRequestsFlat(
+          page,
+          this.flatPerPage,
+          this.sortBy,
+          this.appliedSeerStatusFilter,
+        );
         const { data, total, total_pages: totalPages } = response.data;
         const mapped = data.map((request) => this.mapRequestRatings(request));
 
         if (page === 1) {
           this.flatRequests = mapped;
           this.totalRequestsCount = total;
-          await this.prefetchRequestIntegrationStatusesAsync(mapped);
+          void this.prefetchRequestIntegrationStatusesAsync(mapped, {
+            forceTrakt: false,
+            forceSeer: false,
+            prefetchSeer: this.appliedSeerStatusFilter === 'all',
+          });
         } else {
           this.flatRequests = [...this.flatRequests, ...mapped];
-          if (this.appliedSeerStatusFilter !== 'all') {
-            await this.prefetchRequestIntegrationStatusesAsync(mapped, {
-              forceTrakt: false,
-              forceSeer: true,
-            });
-          } else {
-            void this.prefetchRequestIntegrationStatusesAsync(mapped);
-          }
+          void this.prefetchRequestIntegrationStatusesAsync(mapped, {
+            forceTrakt: false,
+            forceSeer: false,
+            prefetchSeer: this.appliedSeerStatusFilter === 'all',
+          });
         }
 
         this.flatCurrentPage = page;
         this.flatTotalPages = totalPages;
+        this.scheduleBackgroundStatusRefresh();
 
         this.$nextTick(() => {
           setTimeout(() => {
@@ -1245,7 +1329,7 @@ export default {
     },
 
     async fetchRequests(page = 1) {
-      if (page > this.totalPages || this.loading) {
+      if ((this.totalPages > 0 && page > this.totalPages) || this.loading) {
         console.log('⛔ Fetch blocked - page:', page, 'loading:', this.loading);
         return;
       }
@@ -1256,6 +1340,7 @@ export default {
         const params = {
           page: page,
           sort_by: this.sortBy,
+          seer_status: this.appliedSeerStatusFilter,
         };
 
         const response = await axios.get('/api/automation/requests', { params });
@@ -1289,17 +1374,18 @@ export default {
           loadingMoreRequests: false,
         }));
 
-        this.sources = [...this.sources, ...newSources];
+        this.sources = page === 1 ? newSources : [...this.sources, ...newSources];
         this.totalPages = total_pages;
         this.currentPage = page;
+        this.scheduleBackgroundStatusRefresh();
 
         const nestedRequests = newSources.flatMap((source) => source.requests || []);
         if (nestedRequests.length) {
-          if (page === 1) {
-            await this.prefetchRequestIntegrationStatusesAsync(nestedRequests);
-          } else {
-            void this.prefetchRequestIntegrationStatusesAsync(nestedRequests);
-          }
+          void this.prefetchRequestIntegrationStatusesAsync(nestedRequests, {
+            forceTrakt: false,
+            forceSeer: false,
+            prefetchSeer: this.appliedSeerStatusFilter === 'all',
+          });
         }
 
         this.$nextTick(() => {
@@ -1333,16 +1419,22 @@ export default {
       this.prefetchPosterSeerStatuses(requests);
     },
 
-    async prefetchRequestIntegrationStatusesAsync(requests, { forceTrakt = true, forceSeer = true } = {}) {
+    async prefetchRequestIntegrationStatusesAsync(
+      requests,
+      { forceTrakt = true, forceSeer = true, prefetchSeer = true } = {},
+    ) {
       if (!requests?.length) {
         return;
       }
       try {
         await this.loadTraktDefaults();
-        await Promise.all([
+        const prefetches = [
           this.prefetchPosterTraktStatusesAsync(requests, { force: forceTrakt, silent: true }),
-          this.prefetchPosterSeerStatusesAsync(requests, { force: forceSeer, silent: true }),
-        ]);
+        ];
+        if (prefetchSeer) {
+          prefetches.push(this.prefetchPosterSeerStatusesAsync(requests, { force: forceSeer, silent: true }));
+        }
+        await Promise.all(prefetches);
       } catch (error) {
         console.warn('Could not prefetch request integration statuses:', error);
       }
@@ -1352,6 +1444,9 @@ export default {
       const requestId = String(item?.request_id || '');
       const seerStatus = status?.seer_status;
       if (!requestId || !seerStatus) {
+        return;
+      }
+      if (this.appliedSeerStatusFilter !== 'all') {
         return;
       }
 
@@ -1433,6 +1528,7 @@ export default {
       } else {
         await this.fetchRequests(1);
       }
+      this.startBackgroundStatusRefreshInterval();
 
       this.$nextTick(() => {
         this.initObserver();
@@ -1444,6 +1540,14 @@ export default {
     window.removeEventListener('storage', this.refreshConfigFromStorage);
     this.stopBackgroundImageRotation();
     this.cleanupObserver();
+    if (this.requestStatusRefreshTimer) {
+      clearTimeout(this.requestStatusRefreshTimer);
+      this.requestStatusRefreshTimer = null;
+    }
+    if (this.requestStatusRefreshInterval) {
+      clearInterval(this.requestStatusRefreshInterval);
+      this.requestStatusRefreshInterval = null;
+    }
     document.body.style.overflow = 'auto';
   },
 };

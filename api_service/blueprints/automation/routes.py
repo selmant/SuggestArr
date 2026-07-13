@@ -84,6 +84,7 @@ def get_requests():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 8, type=int)
         sort_by = request.args.get('sort_by', 'date-desc', type=str)
+        seer_status_filter = request.args.get('seer_status', 'all', type=str)
         
         # Validte sort_by
         valid_sorts = ['date-desc', 'date-asc', 'title-asc', 'title-desc', 'rating-desc', 'rating-asc']
@@ -94,7 +95,8 @@ def get_requests():
         result = db_manager.get_all_requests_grouped_by_source(
             page=page, 
             per_page=per_page,
-            sort_by=sort_by
+            sort_by=sort_by,
+            seer_status_filter=seer_status_filter,
         )
         
         return jsonify(result), 200
@@ -110,6 +112,7 @@ def get_requests_flat():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 24, type=int)
         sort_by = request.args.get('sort_by', 'date-desc', type=str)
+        seer_status_filter = request.args.get('seer_status', 'all', type=str)
 
         valid_sorts = ['date-desc', 'date-asc', 'title-asc', 'title-desc', 'rating-desc', 'rating-asc']
         if sort_by not in valid_sorts:
@@ -121,10 +124,31 @@ def get_requests_flat():
             page=page,
             per_page=per_page,
             sort_by=sort_by,
+            seer_status_filter=seer_status_filter,
         )
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"Error retrieving flat requests: {e}", exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/count', methods=['GET'])
+def get_requests_count():
+    """Return a deterministic count for the Requests-page filters."""
+    try:
+        search = request.args.get('search', '', type=str)
+        media_type = request.args.get('media_type', 'all', type=str)
+        seer_status_filter = request.args.get('seer_status', 'all', type=str)
+        if media_type not in ('all', 'movie', 'tv'):
+            media_type = 'all'
+        count = DatabaseManager().count_requests(
+            search=search,
+            media_type=media_type,
+            seer_status_filter=seer_status_filter,
+        )
+        return jsonify({'count': count}), 200
+    except Exception as e:
+        logger.error(f"Error counting requests: {e}", exc_info=True)
         return jsonify({"error": "An internal error occurred"}), 500
 
 
@@ -135,6 +159,7 @@ def get_requests_by_source(source_id: str):
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 50, type=int)
         sort_by = request.args.get('sort_by', 'date-desc', type=str)
+        seer_status_filter = request.args.get('seer_status', 'all', type=str)
 
         valid_sorts = ['date-desc', 'date-asc', 'title-asc', 'title-desc', 'rating-desc', 'rating-asc']
         if sort_by not in valid_sorts:
@@ -147,6 +172,7 @@ def get_requests_by_source(source_id: str):
             page=page,
             per_page=per_page,
             sort_by=sort_by,
+            seer_status_filter=seer_status_filter,
         )
         return jsonify(result), 200
     except Exception as e:
