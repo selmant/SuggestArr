@@ -170,6 +170,24 @@ export const getRequestDetails = (tmdbId, mediaType) => {
     return axios.get(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/details`);
 };
 
+export const requestCollectionPart = ({
+    tmdbId,
+    mediaType = 'movie',
+    mirrorTmdbId,
+    mirrorMediaType = 'movie',
+    metadata = {},
+    collectionName = '',
+}) => {
+    return axios.post('/api/automation/requests/collection/request', {
+        tmdb_id: tmdbId,
+        media_type: mediaType,
+        mirror_tmdb_id: mirrorTmdbId,
+        mirror_media_type: mirrorMediaType,
+        metadata,
+        collection_name: collectionName,
+    });
+};
+
 export const getRequestSeerStatus = (tmdbId, mediaType) => {
     return axios.get(`/api/automation/requests/${encodeURIComponent(tmdbId)}/${mediaType}/seer/status`);
 };

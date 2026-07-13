@@ -346,3 +346,92 @@ def test_derive_seer_status_maps_media_states():
     assert seer_status.derive_seer_status(2, 4) == "partially_available"
     assert seer_status.derive_seer_status(2, 3) == "processing"
     assert seer_status.derive_seer_status(2, 2) == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_request_collection_part_mirrors_source_user_and_settings():
+    db = MagicMock()
+    db.get_request_mirror_context.return_value = {
+        "user_id": "u1",
+        "user_name": "Alice",
+        "is_anime": True,
+        "source_id": "900",
+        "source_origin": "jellyfin",
+    }
+    db.check_request_exists.return_value = False
+    FakeSeerClient.instances = []
+
+    class RequestingFakeSeerClient(FakeSeerClient):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.anime_profile_config = kwargs.get("anime_profile_config") or {}
+            self.request_media = AsyncMock(return_value=True)
+
+    env = _configured_env()
+    env["SEER_ANIME_PROFILE_CONFIG"] = {
+        "anime_movie": {"serverId": 1, "profileId": 2, "rootFolder": "/anime"},
+    }
+    env["FILTER_NUM_SEASONS"] = "all"
+    env["REQUEST_FIRST_SEASON_ONLY"] = False
+
+    with patch.object(request_actions, "SeerClient", RequestingFakeSeerClient), \
+            patch.object(request_actions, "load_env_vars", return_value=env):
+        result = await request_actions.request_collection_part(
+            db,
+            tmdb_id="552",
+            media_type="movie",
+            mirror_tmdb_id="550",
+            mirror_media_type="movie",
+            metadata={
+                "title": "Fight Club 3",
+                "overview": "More soap.",
+                "poster_path": "/fight3.jpg",
+                "release_date": "2027-01-01",
+            },
+            collection_name="Fight Club Collection",
+        )
+
+    assert result["enqueued"] is True
+    assert result["tmdb_id"] == "552"
+    assert result["media_type"] == "movie"
+    db.get_request_mirror_context.assert_called_once_with("movie", "550")
+    client = FakeSeerClient.instances[-1]
+    assert client.anime_profile_config["anime_movie"]["profileId"] == 2
+    client.request_media.assert_awaited_once()
+    kwargs = client.request_media.await_args.kwargs
+    assert kwargs["media_type"] == "movie"
+    assert kwargs["media"]["id"] == 552
+    assert kwargs["media"]["title"] == "Fight Club 3"
+    assert kwargs["user"] == {"id": "u1", "name": "Alice"}
+    assert kwargs["is_anime"] is True
+    assert kwargs["source"]["id"] == "900"
+    assert kwargs["source"]["_source_origin"] == "jellyfin"
+    assert "Fight Club Collection" in kwargs["rationale"]
+
+
+@pytest.mark.asyncio
+async def test_request_collection_part_rejects_non_movie():
+    db = MagicMock()
+    with pytest.raises(ValueError, match="movie"):
+        await request_actions.request_collection_part(
+            db,
+            tmdb_id="1",
+            media_type="tv",
+            mirror_tmdb_id="2",
+            mirror_media_type="movie",
+        )
+
+
+@pytest.mark.asyncio
+async def test_request_collection_part_errors_when_mirror_missing():
+    db = MagicMock()
+    db.get_request_mirror_context.return_value = None
+
+    with pytest.raises(ValueError, match="mirror"):
+        await request_actions.request_collection_part(
+            db,
+            tmdb_id="552",
+            media_type="movie",
+            mirror_tmdb_id="550",
+            mirror_media_type="movie",
+        )

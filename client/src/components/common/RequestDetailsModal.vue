@@ -419,6 +419,61 @@
                 </div>
               </div>
             </section>
+
+            <section
+              v-if="collectionParts.length > 0"
+              class="request-details-modal__section request-details-modal__related"
+              data-testid="collection-parts">
+              <h2 class="request-details-modal__section-title">
+                Collection: {{ displayCollection }} ({{ collectionParts.length }})
+              </h2>
+              <p v-if="collectionRequestError" class="request-details-modal__details-error">{{ collectionRequestError }}</p>
+              <p v-if="collectionRequestMessage" class="request-details-modal__collection-message">{{ collectionRequestMessage }}</p>
+              <div class="request-details-modal__collection-list">
+                <div
+                  v-for="part in collectionParts"
+                  :key="part.tmdb_id"
+                  class="request-details-modal__collection-item">
+                  <div class="request-details-modal__collection-poster">
+                    <img
+                      v-if="part.poster_path"
+                      :src="part.poster_path"
+                      :alt="part.title"
+                      class="request-details-modal__collection-poster-image" />
+                    <div v-else class="request-details-modal__collection-poster-placeholder">
+                      <i class="fas fa-image"></i>
+                    </div>
+                  </div>
+                  <div class="request-details-modal__collection-info">
+                    <h4 class="request-details-modal__collection-title">
+                      {{ part.title }}
+                      <span v-if="part.release_date" class="request-details-modal__collection-year">
+                        ({{ String(part.release_date).slice(0, 4) }})
+                      </span>
+                    </h4>
+                    <span
+                      class="seer-status-badge"
+                      :class="part.seer_status ? `seer-status-badge--${part.seer_status}` : ''">
+                      {{ formatSeerStatusLabel(part.seer_status) }}
+                    </span>
+                  </div>
+                  <div class="request-details-modal__collection-actions">
+                    <button
+                      v-if="part.can_request"
+                      type="button"
+                      class="request-details-modal__collection-request-btn"
+                      data-testid="collection-request-btn"
+                      :disabled="collectionRequestBusyId === String(part.tmdb_id)"
+                      @click="requestCollectionPart(part)">
+                      {{ collectionRequestBusyId === String(part.tmdb_id) ? 'Requesting…' : 'Request' }}
+                    </button>
+                    <span v-else class="request-details-modal__collection-unavailable">
+                      Already available/requested
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </div>
@@ -433,6 +488,8 @@ import {
   getRequestMethodMetadata,
   getRequestSourceContentMetadata,
 } from '@/utils/requestSourceMetadata.js';
+import { requestCollectionPart as requestCollectionPartApi } from '@/api/api.js';
+import { formatSeerStatusLabel } from '@/utils/seerStatus.js';
 import TraktStarRating from '@/components/common/TraktStarRating.vue';
 import RatingBadges from '@/components/common/RatingBadges.vue';
 import { DEFAULT_RATING_BADGE_SETTINGS } from '@/utils/ratingBadgeConfig.js';
@@ -549,6 +606,9 @@ export default {
       detailsError: '',
       detailsRequestToken: 0,
       showEmbeddedTrailer: false,
+      collectionRequestBusyId: null,
+      collectionRequestError: '',
+      collectionRequestMessage: '',
     };
   },
   emits: [
@@ -702,7 +762,25 @@ export default {
       return Array.isArray(networks) && networks.length ? networks.join(', ') : '';
     },
     displayCollection() {
-      return this.details?.collection || '';
+      const collection = this.details?.collection;
+      if (!collection) {
+        return '';
+      }
+      if (typeof collection === 'string') {
+        return collection;
+      }
+      return collection.name || '';
+    },
+    collectionParts() {
+      if (this.selectedSource?.media_type !== 'movie') {
+        return [];
+      }
+      const collection = this.details?.collection;
+      if (!collection || typeof collection !== 'object' || !Array.isArray(collection.parts)) {
+        return [];
+      }
+      const currentId = String(this.detailsTmdbId);
+      return collection.parts.filter(part => String(part.tmdb_id) !== currentId);
     },
     displayProductionCompanies() {
       const companies = this.details?.production_companies;
@@ -848,12 +926,16 @@ export default {
   },
   methods: {
     formatDate,
+    formatSeerStatusLabel,
     resetDetails() {
       this.details = null;
       this.detailsLoading = false;
       this.detailsReady = false;
       this.detailsError = '';
       this.showEmbeddedTrailer = false;
+      this.collectionRequestBusyId = null;
+      this.collectionRequestError = '';
+      this.collectionRequestMessage = '';
       this.detailsRequestToken += 1;
     },
     async fetchDetailsForSelection() {
@@ -919,6 +1001,47 @@ export default {
       this.$emit('update:trakt-rating-stars', value);
       if (value) {
         this.$emit('rate-selected-on-trakt');
+      }
+    },
+    async requestCollectionPart(part) {
+      if (this.collectionRequestBusyId || !part?.can_request) {
+        return;
+      }
+
+      const partId = String(part.tmdb_id);
+      this.collectionRequestBusyId = partId;
+      this.collectionRequestError = '';
+      this.collectionRequestMessage = '';
+
+      try {
+        const response = await requestCollectionPartApi({
+          tmdbId: part.tmdb_id,
+          mediaType: part.media_type || 'movie',
+          mirrorTmdbId: this.detailsTmdbId,
+          mirrorMediaType: this.selectedSource.media_type,
+          metadata: {
+            title: part.title,
+            overview: part.overview,
+            poster_path: part.poster_path,
+            release_date: part.release_date,
+          },
+          collectionName: this.displayCollection,
+        });
+        const result = response?.data || {};
+        part.can_request = false;
+        if (result.enqueued) {
+          part.seer_status = 'pending';
+          this.collectionRequestMessage = `Request queued for "${part.title}".`;
+        } else if (result.already_requested) {
+          part.seer_status = part.seer_status || 'pending';
+          this.collectionRequestMessage = `"${part.title}" is already requested.`;
+        } else {
+          this.collectionRequestMessage = `Request submitted for "${part.title}".`;
+        }
+      } catch (error) {
+        this.collectionRequestError = error?.response?.data?.message || 'Could not request collection title.';
+      } finally {
+        this.collectionRequestBusyId = null;
       }
     },
   },
@@ -1460,6 +1583,101 @@ export default {
 
 .request-details-modal__request-btn:hover {
   background: #6366f1;
+}
+
+.request-details-modal__collection-message {
+  margin: 0 0 0.65rem;
+  color: #86efac;
+  font-size: 0.88rem;
+}
+
+.request-details-modal__collection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.request-details-modal__collection-item {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.55rem;
+  background: #1f2937;
+  border: 1px solid #374151;
+}
+
+.request-details-modal__collection-poster {
+  flex: 0 0 48px;
+  width: 48px;
+  border-radius: 0.35rem;
+  overflow: hidden;
+  background: #111827;
+}
+
+.request-details-modal__collection-poster-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.request-details-modal__collection-poster-placeholder {
+  width: 48px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  font-size: 1rem;
+}
+
+.request-details-modal__collection-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.request-details-modal__collection-title {
+  margin: 0 0 0.35rem;
+  color: #f3f4f6;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.request-details-modal__collection-year {
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.request-details-modal__collection-actions {
+  flex-shrink: 0;
+}
+
+.request-details-modal__collection-request-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.8rem;
+  border: none;
+  border-radius: 0.45rem;
+  background: #4f46e5;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.request-details-modal__collection-request-btn:hover:not(:disabled) {
+  background: #6366f1;
+}
+
+.request-details-modal__collection-request-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.request-details-modal__collection-unavailable {
+  color: #9ca3af;
+  font-size: 0.8rem;
+  font-style: italic;
 }
 
 .request-details-fade-enter-active,

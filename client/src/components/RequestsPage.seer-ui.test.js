@@ -29,7 +29,7 @@ test('request details modal renders Seer actions for selected and related reques
   assert.match(requestPosterCardSource, /seer-poster-dock/);
   assert.match(requestsPageSource, /useRequestSeerActions/);
   assert.match(requestsPageSource, /posterSeerProps/);
-  assert.match(requestsPageSource, /await this\.prefetchRequestIntegrationStatusesAsync\(mapped\)/);
+  assert.match(requestsPageSource, /void this\.prefetchRequestIntegrationStatusesAsync\(mapped/);
   assert.match(requestsPageSource, /Could not prefetch request integration statuses/);
   assert.match(requestsPageSource, /refreshModalIntegrationStatuses/);
   assert.match(requestsPageSource, /loadSeerStatusForSource\(source, \{ force: true \}\)/);
@@ -49,4 +49,13 @@ test('request details modal renders Seer actions for selected and related reques
   assert.match(requestsPageSource, /allRequestsHaveFreshSeerStatus/);
   assert.match(requestsPageSource, /isSeerBusy\(request\)/);
   assert.match(requestsPageSource, /filterIntegrationLoading/);
+  assert.match(requestsPageSource, /prefetchSeer: this\.appliedSeerStatusFilter === 'all'/);
+});
+
+test('request details modal shows collection parts and request action', () => {
+  assert.match(detailsModalSource, /data-testid="collection-parts"/);
+  assert.match(detailsModalSource, /data-testid="collection-request-btn"/);
+  assert.match(detailsModalSource, /collectionParts/);
+  assert.match(detailsModalSource, /requestCollectionPart/);
+  assert.match(detailsModalSource, /displayCollection/);
 });

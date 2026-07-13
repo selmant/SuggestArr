@@ -763,7 +763,7 @@ class TestFormatMediaDetails(unittest.TestCase):
             "originalLanguage": "en",
             "backdropPath": "/backdrop.jpg",
             "homepage": "https://www.foxmovies.com/movies/fight-club",
-            "collection": {"name": "Fight Club Collection"},
+            "collection": {"id": 2883, "name": "Fight Club Collection"},
             "productionCompanies": [{"name": "Fox 2000 Pictures"}],
             "keywords": {"keywords": [{"name": "dual identity"}]},
             "releases": {
@@ -808,9 +808,65 @@ class TestFormatMediaDetails(unittest.TestCase):
             {"name": "Hulu", "logo_path": "https://image.tmdb.org/t/p/w45/hulu.png"},
             {"name": "Apple TV", "logo_path": "https://image.tmdb.org/t/p/w45/apple.png"},
         ])
-        self.assertEqual(result["collection"], "Fight Club Collection")
+        self.assertEqual(result["collection"], {
+            "id": 2883,
+            "name": "Fight Club Collection",
+            "parts": [],
+        })
         self.assertEqual(result["keywords"], ["dual identity"])
         self.assertIn("backdrop.jpg", result["backdrop_path"])
+
+    def test_formats_collection_parts_with_requestability(self):
+        payload = {
+            "id": 2883,
+            "name": "Fight Club Collection",
+            "overview": "Soap and chaos.",
+            "parts": [
+                {
+                    "id": 550,
+                    "mediaType": "movie",
+                    "title": "Fight Club",
+                    "overview": "A ticking-time-bomb insomniac...",
+                    "releaseDate": "1999-10-15",
+                    "posterPath": "/fight.jpg",
+                    "mediaInfo": {"status": 5},
+                },
+                {
+                    "id": 551,
+                    "mediaType": "movie",
+                    "title": "Fight Club 2",
+                    "overview": "More soap.",
+                    "releaseDate": "2026-01-01",
+                    "posterPath": "/fight2.jpg",
+                    "mediaInfo": {
+                        "status": 2,
+                        "requests": [{"id": 99, "status": 1}],
+                    },
+                },
+                {
+                    "id": 552,
+                    "title": "Fight Club 3",
+                    "overview": "",
+                    "releaseDate": "2027-01-01",
+                    "posterPath": "/fight3.jpg",
+                },
+            ],
+        }
+
+        result = SeerClient._format_collection_details(payload)
+
+        self.assertEqual(result["id"], 2883)
+        self.assertEqual(result["name"], "Fight Club Collection")
+        self.assertEqual(len(result["parts"]), 3)
+        self.assertEqual(result["parts"][0]["tmdb_id"], "550")
+        self.assertEqual(result["parts"][0]["seer_status"], "available")
+        self.assertFalse(result["parts"][0]["can_request"])
+        self.assertEqual(result["parts"][1]["seer_status"], "pending")
+        self.assertFalse(result["parts"][1]["can_request"])
+        self.assertEqual(result["parts"][2]["tmdb_id"], "552")
+        self.assertEqual(result["parts"][2]["title"], "Fight Club 3")
+        self.assertTrue(result["parts"][2]["can_request"])
+        self.assertIn("fight3.jpg", result["parts"][2]["poster_path"])
 
     def test_formats_tv_details_with_created_by_and_episode_runtime(self):
         payload = {

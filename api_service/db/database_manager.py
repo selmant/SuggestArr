@@ -1394,6 +1394,45 @@ class DatabaseManager:
             result = cursor.fetchone()
             return result is not None
 
+    def get_request_mirror_context(self, media_type: str, media_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Return user/settings fields needed to mirror a request for a related title.
+
+        Picks the most recent active request row for the given TMDB id.
+        """
+        ph = self._ph()
+        query = f"""
+            SELECT
+                r.user_id,
+                u.user_name,
+                r.is_anime,
+                r.tmdb_source_id,
+                r.source_origin,
+                m.title
+            FROM requests r
+            LEFT JOIN users u ON r.user_id = u.user_id
+            LEFT JOIN metadata m ON r.tmdb_request_id = m.media_id AND r.media_type = m.media_type
+            WHERE r.tmdb_request_id = {ph}
+              AND r.media_type = {ph}
+              AND COALESCE(r.is_active, 1) = 1
+            ORDER BY r.requested_at DESC
+            LIMIT 1
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (str(media_id), media_type))
+            row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "user_id": row[0],
+            "user_name": row[1],
+            "is_anime": bool(row[2]) if row[2] is not None else False,
+            "source_id": row[3],
+            "source_origin": row[4],
+            "title": row[5],
+        }
+
     def check_pending_request_exists(self, media_type: str, media_id: str) -> bool:
         """Check whether a media item is already waiting for Seer delivery."""
         placeholder = '%s' if self.db_type in ['mysql', 'postgres'] else '?'

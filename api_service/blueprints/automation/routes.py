@@ -20,6 +20,7 @@ from api_service.services.seer.request_actions import (
     get_request_details,
     get_request_seer_status,
     get_request_seer_statuses_batch,
+    request_collection_part,
 )
 from api_service.utils.asyncio_loop import close_event_loop
 
@@ -392,6 +393,42 @@ def get_request_details_route(tmdb_id: str, media_type: str):
         return jsonify({"message": str(exc)}), 502
     except Exception as exc:
         logger.error("Error fetching request details: %s", exc, exc_info=True)
+        return jsonify({"error": "An internal error occurred"}), 500
+
+
+@automation_bp.route('/requests/collection/request', methods=['POST'])
+@require_role('admin')
+@limiter.limit("30 per minute")
+def request_collection_part_route():
+    """Enqueue a Seer request for a collection sibling, mirroring another request."""
+    try:
+        payload = _get_json()
+        tmdb_id = payload.get("tmdb_id")
+        media_type = payload.get("media_type", "movie")
+        mirror_tmdb_id = payload.get("mirror_tmdb_id")
+        mirror_media_type = payload.get("mirror_media_type", "movie")
+        if tmdb_id is None or mirror_tmdb_id is None:
+            return jsonify({"message": "tmdb_id and mirror_tmdb_id are required"}), 400
+        media_type = _validate_media_type(media_type)
+        mirror_media_type = _validate_media_type(mirror_media_type)
+        result = async_to_sync(request_collection_part)(
+            DatabaseManager(),
+            tmdb_id=str(tmdb_id),
+            media_type=media_type,
+            mirror_tmdb_id=str(mirror_tmdb_id),
+            mirror_media_type=mirror_media_type,
+            metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+            collection_name=payload.get("collection_name"),
+        )
+        status = 202 if result.get("enqueued") else 200
+        return jsonify(result), status
+    except ValueError as exc:
+        return jsonify({"message": str(exc)}), 400
+    except RuntimeError as exc:
+        logger.warning("Collection request failed: %s", exc)
+        return jsonify({"message": str(exc)}), 502
+    except Exception as exc:
+        logger.error("Error requesting collection part: %s", exc, exc_info=True)
         return jsonify({"error": "An internal error occurred"}), 500
 
 

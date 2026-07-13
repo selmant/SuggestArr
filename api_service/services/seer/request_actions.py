@@ -44,6 +44,24 @@ def _create_client() -> SeerClient:
     return SeerClient(api_url=api_url, api_key=api_key, session_token=session_token)
 
 
+def _create_enqueue_client() -> SeerClient:
+    """Build a SeerClient with profile/season settings for new media requests."""
+    config = load_env_vars()
+    api_url, api_key, session_token = _resolve_seer_credentials(config)
+    anime_raw = config.get("SEER_ANIME_PROFILE_CONFIG", {})
+    anime_profile_config = anime_raw if isinstance(anime_raw, dict) else {}
+    return SeerClient(
+        api_url=api_url,
+        api_key=api_key,
+        session_token=session_token,
+        number_of_seasons=config.get("FILTER_NUM_SEASONS") or "all",
+        exclude_downloaded=False,
+        exclude_watched=False,
+        anime_profile_config=anime_profile_config,
+        request_first_season_only=config.get("REQUEST_FIRST_SEASON_ONLY", False),
+    )
+
+
 def invalidate_requests_index_cache() -> None:
     """Clear the in-process Seer requests index cache."""
     _index_cache["fetched_at"] = 0.0
@@ -306,3 +324,76 @@ async def decline_request(
 ) -> dict[str, Any]:
     """Decline pending Seer request(s) matching a SuggestArr request item."""
     return await _apply_action(db, tmdb_id, media_type, "decline")
+
+
+async def request_collection_part(
+    db: DatabaseManager,
+    *,
+    tmdb_id: str,
+    media_type: str,
+    mirror_tmdb_id: str,
+    mirror_media_type: str,
+    metadata: Optional[dict[str, Any]] = None,
+    collection_name: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Enqueue a Seer request for a collection sibling, mirroring the source request.
+
+    Copies ``user_id`` / ``is_anime`` / source linkage from the currently viewed
+    request so Radarr profile routing and attribution stay consistent.
+    """
+    media_type = _normalize_media_type(media_type)
+    mirror_media_type = _normalize_media_type(mirror_media_type)
+    if media_type != "movie":
+        raise ValueError("Collection requests are only supported for movie media")
+
+    tmdb_id = str(tmdb_id)
+    mirror_tmdb_id = str(mirror_tmdb_id)
+    mirror = db.get_request_mirror_context(mirror_media_type, mirror_tmdb_id)
+    if not mirror:
+        raise ValueError("Could not find mirror request to copy user/settings from")
+
+    metadata = metadata if isinstance(metadata, dict) else {}
+    media = {
+        "id": int(tmdb_id),
+        "title": metadata.get("title") or f"TMDB {tmdb_id}",
+        "overview": metadata.get("overview") or "",
+        "poster_path": metadata.get("poster_path"),
+        "release_date": metadata.get("release_date") or "",
+        "media_type": "movie",
+    }
+
+    user = None
+    if mirror.get("user_id"):
+        user = {
+            "id": mirror["user_id"],
+            "name": mirror.get("user_name") or mirror["user_id"],
+        }
+
+    source = None
+    if mirror.get("source_id"):
+        source = {
+            "id": mirror["source_id"],
+            "_source_origin": mirror.get("source_origin"),
+        }
+
+    collection_label = (collection_name or "").strip() or "collection"
+    mirror_title = mirror.get("title") or mirror_tmdb_id
+    rationale = f"Collection request ({collection_label}) from {mirror_title}"
+
+    async with _create_enqueue_client() as client:
+        enqueued = await client.request_media(
+            media_type="movie",
+            media=media,
+            source=source,
+            user=user,
+            is_anime=bool(mirror.get("is_anime")),
+            rationale=rationale,
+        )
+
+    return {
+        "enqueued": bool(enqueued),
+        "tmdb_id": tmdb_id,
+        "media_type": "movie",
+        "already_requested": not enqueued and db.check_request_exists("movie", tmdb_id),
+    }

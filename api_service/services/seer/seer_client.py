@@ -9,7 +9,10 @@ from api_service.utils.tmdb_images import tmdb_image_url
 
 BATCH_SIZE = 20  # Number of requests fetched per batch
 HTTP_OK = {200, 201, 202}  # Include 202 Accepted for async operations
-from api_service.services.seer.seer_status import PENDING_REQUEST_STATUSES
+from api_service.services.seer.seer_status import (
+    AVAILABLE_MEDIA_STATUSES,
+    derive_seer_status,
+)
 
 
 def _as_bool(value):
@@ -859,7 +862,16 @@ class SeerClient(BaseHTTPClient):
             for company in data.get("productionCompanies", [])[:4]
             if company.get("name")
         ]
-        collection = (data.get("collection") or {}).get("name") or ""
+        raw_collection = data.get("collection") or {}
+        collection_name = raw_collection.get("name") or ""
+        collection_id = raw_collection.get("id")
+        collection = None
+        if collection_id or collection_name:
+            collection = {
+                "id": int(collection_id) if collection_id is not None else None,
+                "name": collection_name,
+                "parts": [],
+            }
         keywords = cls._extract_keywords(data)
 
         return {
@@ -896,9 +908,74 @@ class SeerClient(BaseHTTPClient):
             "watch_providers": cls._format_watch_providers(data.get("watchProviders")),
         }
 
+    @classmethod
+    def _format_collection_part(cls, part):
+        """Normalize one Seer/TMDB collection part into UI-ready fields."""
+        media_info = part.get("mediaInfo") or {}
+        requests = media_info.get("requests") or []
+        primary_request = requests[0] if requests else {}
+        request_status = primary_request.get("status")
+        media_status = media_info.get("status")
+        seer_status = derive_seer_status(request_status, media_status)
+        can_request = (
+            seer_status in {"not_found", "declined", "failed", "deleted"}
+            and media_status not in AVAILABLE_MEDIA_STATUSES
+        )
+        return {
+            "tmdb_id": str(part.get("id") or ""),
+            "media_type": "movie",
+            "title": part.get("title") or "",
+            "overview": part.get("overview") or "",
+            "release_date": part.get("releaseDate") or "",
+            "poster_path": tmdb_image_url(part.get("posterPath"), "w342"),
+            "seer_status": seer_status,
+            "can_request": can_request,
+        }
+
+    @classmethod
+    def _format_collection_details(cls, data):
+        """
+        Map Seer collection payload into a normalized dict with requestable parts.
+
+        :param data: Raw Seer ``GET /api/v1/collection/{id}`` response.
+        :return: Normalized collection metadata for the request details UI.
+        """
+        parts = [
+            cls._format_collection_part(part)
+            for part in (data.get("parts") or [])
+            if part and part.get("id") is not None
+        ]
+        return {
+            "id": data.get("id"),
+            "name": data.get("name") or "",
+            "overview": data.get("overview") or "",
+            "parts": parts,
+        }
+
+    async def get_collection_details(self, collection_id):
+        """
+        Fetch a TMDB movie collection (with parts) from Seer.
+
+        :param collection_id: TMDB collection id.
+        :return: Normalized collection dict, or None when Seer has no payload.
+        """
+        if collection_id is None:
+            return None
+        data = await self._make_request(
+            "GET",
+            f"api/v1/collection/{int(collection_id)}",
+            use_cookie=bool(self.session_token),
+        )
+        if not data:
+            return None
+        return self._format_collection_details(data)
+
     async def get_media_details(self, tmdb_id, media_type):
         """
         Fetch rich media metadata from Seer's movie/tv detail endpoint.
+
+        When the movie belongs to a collection, also load collection parts so the
+        details UI can list sibling titles and request them.
 
         :param tmdb_id: TMDB id for the requested item.
         :param media_type: ``movie`` or ``tv``.
@@ -911,6 +988,16 @@ class SeerClient(BaseHTTPClient):
         details["seer_url"] = (
             f"{self.api_url.rstrip('/')}/{'movie' if media_type == 'movie' else 'tv'}/{int(tmdb_id)}"
         )
+        collection = details.get("collection")
+        if media_type == "movie" and isinstance(collection, dict) and collection.get("id"):
+            collection_details = await self.get_collection_details(collection["id"])
+            if collection_details:
+                details["collection"] = {
+                    **collection,
+                    "name": collection_details.get("name") or collection.get("name") or "",
+                    "overview": collection_details.get("overview") or "",
+                    "parts": collection_details.get("parts") or [],
+                }
         return details
 
     async def delete_media_file_by_tmdb(self, tmdb_id, media_type):
