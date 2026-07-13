@@ -41,6 +41,28 @@ async def test_fetch_trakt_recommendations_applies_max_results():
 
 
 @pytest.mark.asyncio
+async def test_fetch_trakt_recommendations_skips_watched_titles_locally():
+    automation = TraktRecommendationsAutomation()
+    automation.job_data = {
+        "media_type": "movie",
+        "max_results": 2,
+        "filters": {"ignore_watched": True},
+    }
+    automation.trakt_client = AsyncMock()
+    automation.trakt_client.get_recommendations.return_value = [
+        {"tmdb_id": "1", "title": "Watched", "media_type": "movie"},
+        {"tmdb_id": "2", "title": "New", "media_type": "movie"},
+    ]
+    automation.watched_ids = {"movie": {"1"}, "tv": set()}
+    automation._should_skip_global_request = AsyncMock(return_value=False)
+    automation._enrich_and_filter_item = AsyncMock(side_effect=lambda item: item)
+
+    results = await automation.fetch_trakt_recommendations()
+
+    assert [item["tmdb_id"] for item in results] == ["2"]
+
+
+@pytest.mark.asyncio
 async def test_fetch_trakt_recommendations_requests_max_per_type_for_both():
     automation = TraktRecommendationsAutomation()
     automation.job_data = {

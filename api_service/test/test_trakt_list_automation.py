@@ -34,6 +34,31 @@ async def test_filter_and_request_global_dedup_skips_existing_requests():
 
 
 @pytest.mark.asyncio
+async def test_fetch_list_items_skips_trakt_watched_titles():
+    automation = TraktListAutomation()
+    automation.job_data = {
+        "media_type": "movie",
+        "max_results": 2,
+        "filters": {"dedup_mode": "global"},
+    }
+    automation.trakt_client = AsyncMock()
+    automation.trakt_client.get_list_items.side_effect = [
+        [
+            {"tmdb_id": "1", "media_type": "movie", "title": "Watched"},
+            {"tmdb_id": "2", "media_type": "movie", "title": "New"},
+        ],
+        [],
+    ]
+    automation._should_skip_fetch_item = AsyncMock(return_value=False)
+    automation._enrich_and_filter_item = AsyncMock(side_effect=lambda item: item)
+    automation.watched_ids = {"movie": {"1"}, "tv": set()}
+
+    results = await automation.fetch_list_items()
+
+    assert [item["tmdb_id"] for item in results] == ["2"]
+
+
+@pytest.mark.asyncio
 async def test_filter_and_request_per_list_dedup_marks_seen_items():
     automation = TraktListAutomation()
     automation.job_id = 7

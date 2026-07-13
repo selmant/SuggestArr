@@ -30,6 +30,8 @@ class TraktListAutomation(TraktJobAutomationBase):
         self.list_ref: Optional[str] = None
         self.use_watchlist: bool = False
         self.authenticated: bool = False
+        self.watched_ids: Dict[str, set[str]] = {"movie": set(), "tv": set()}
+        self.watched_account: Optional[dict] = None
 
     @classmethod
     async def create(cls, job_id: int, dry_run: bool = False) -> "TraktListAutomation":
@@ -75,6 +77,7 @@ class TraktListAutomation(TraktJobAutomationBase):
         self.trakt_client, self.list_user, self.list_ref, self.use_watchlist, self.authenticated = (
             self._build_trakt_client_and_list_target()
         )
+        self.watched_account = self._resolve_watched_account()
 
     def _resolve_list_target(self) -> Tuple[Optional[str], str, bool]:
         """Resolve list username, reference, and whether the watchlist is targeted."""
@@ -134,6 +137,67 @@ class TraktListAutomation(TraktJobAutomationBase):
         client = TraktClient(client_id, client_secret, db=self.db_manager)
         return client, list_user, list_ref, use_watchlist, False
 
+    def _resolve_watched_account(self) -> Optional[dict]:
+        """Resolve the linked Trakt account used for watched exclusions."""
+        provider = str(self.env_vars.get("SELECTED_SERVICE") or "").lower()
+        filters = self.job_data.get("filters", {})
+        if filters.get("list_source") == "linked_user":
+            candidates = (self.job_data.get("user_ids") or [])[:1]
+        else:
+            selected_users = self.env_vars.get("SELECTED_USERS") or []
+            candidates = [
+                user.get("id") if isinstance(user, dict) else user
+                for user in selected_users
+            ][:1]
+
+        if not provider or not candidates:
+            return None
+        try:
+            identity = self.db_manager.get_media_user_identity(provider, str(candidates[0]))
+            return TraktAccountResolver(self.db_manager).resolve(identity["id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    async def _load_watched_ids(self) -> None:
+        """Load watched TMDB IDs before fetching list candidates."""
+        if not self.watched_account:
+            return
+
+        client = self.trakt_client if self.authenticated else None
+        temporary_client = None
+        if client is None:
+            resolved = self.watched_account
+            client_id, client_secret = self._get_trakt_app_credentials()
+            temporary_client = TraktClient(
+                client_id,
+                client_secret,
+                access_token=resolved.get("access_token", ""),
+                refresh_token=resolved.get("refresh_token", ""),
+                expires_at=resolved.get("expires_at"),
+                db=self.db_manager,
+                link_id=resolved["id"],
+                token_source=resolved.get("token_source", "manual_oauth"),
+            )
+
+        try:
+            if temporary_client is not None:
+                async with temporary_client as client:
+                    await client.init_existing_content()
+                    existing = client.existing_content or {}
+            else:
+                await client.init_existing_content()
+                existing = client.existing_content or {}
+            self.watched_ids = {
+                "movie": {str(item["tmdb_id"]) for item in existing.get("movie", []) if item.get("tmdb_id")},
+                "tv": {str(item["tmdb_id"]) for item in existing.get("tv", []) if item.get("tmdb_id")},
+            }
+            self.logger.info(
+                "Trakt list watched exclusion loaded: movies=%d, tv=%d",
+                len(self.watched_ids["movie"]), len(self.watched_ids["tv"]),
+            )
+        except Exception as exc:
+            self.logger.warning("Could not load Trakt watched exclusions for list job: %s", exc)
+
     async def run(self, dry_run: bool = False) -> ExecutionResult:
         """Execute the Trakt list job.
 
@@ -170,6 +234,7 @@ class TraktListAutomation(TraktJobAutomationBase):
                         await stack.enter_async_context(self.tmdb_client.omdb_client)
                 if self.trakt_client:
                     await stack.enter_async_context(self.trakt_client)
+                await self._load_watched_ids()
 
                 results = await self.fetch_list_items()
             request_target = int(self.job_data.get("max_results") or 20)
@@ -233,6 +298,7 @@ class TraktListAutomation(TraktJobAutomationBase):
             "duplicate_items": 0,
             "missing_tmdb_id": 0,
             "skipped_dedup": 0,
+            "skipped_watched": 0,
             "failed_quality_filter": 0,
             "kept": 0,
         }
@@ -275,6 +341,10 @@ class TraktListAutomation(TraktJobAutomationBase):
                     continue
                 collected_keys.add(seen_key)
 
+                if str(tmdb_id) in self.watched_ids.get(item_media_type, set()):
+                    stats["skipped_watched"] += 1
+                    continue
+
                 if await self._should_skip_fetch_item(
                     item_media_type,
                     tmdb_id,
@@ -299,7 +369,7 @@ class TraktListAutomation(TraktJobAutomationBase):
         self.logger.info(
             "Trakt list fetch stats (target=%d, dedup=%s): pages=%d, raw=%d, "
             "duplicate=%d, missing_tmdb=%d, skipped_dedup=%d, "
-            "failed_quality_filter=%d, kept=%d",
+            "skipped_watched=%d, failed_quality_filter=%d, kept=%d",
             max_results,
             dedup_mode,
             stats["pages_fetched"],
@@ -307,6 +377,7 @@ class TraktListAutomation(TraktJobAutomationBase):
             stats["duplicate_items"],
             stats["missing_tmdb_id"],
             stats["skipped_dedup"],
+            stats["skipped_watched"],
             stats["failed_quality_filter"],
             stats["kept"],
         )

@@ -23,6 +23,7 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
         """Initialize with logger only. Use create() for full initialization."""
         super().__init__()
         self.trakt_client: Optional[TraktClient] = None
+        self.watched_ids: Dict[str, set[str]] = {"movie": set(), "tv": set()}
 
     @classmethod
     async def create(cls, job_id: int, dry_run: bool = False) -> "TraktRecommendationsAutomation":
@@ -90,6 +91,19 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
             token_source=resolved.get("token_source", "manual_oauth"),
         )
 
+    async def _load_watched_ids(self) -> None:
+        """Load watched TMDB IDs locally as a fallback to Trakt filtering."""
+        await self.trakt_client.init_existing_content()
+        existing = self.trakt_client.existing_content or {}
+        self.watched_ids = {
+            "movie": {str(item["tmdb_id"]) for item in existing.get("movie", []) if item.get("tmdb_id")},
+            "tv": {str(item["tmdb_id"]) for item in existing.get("tv", []) if item.get("tmdb_id")},
+        }
+        self.logger.info(
+            "Trakt recommendation watched exclusion loaded: movies=%d, tv=%d",
+            len(self.watched_ids["movie"]), len(self.watched_ids["tv"]),
+        )
+
     async def run(self, dry_run: bool = False) -> ExecutionResult:
         """Execute the Trakt recommendations job.
 
@@ -126,6 +140,8 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
                         await stack.enter_async_context(self.tmdb_client.omdb_client)
                 if self.trakt_client:
                     await stack.enter_async_context(self.trakt_client)
+                if bool(self.job_data.get("filters", {}).get("ignore_watched", True)):
+                    await self._load_watched_ids()
 
                 results = await self.fetch_trakt_recommendations()
             request_target = int(self.job_data.get("max_results") or 20)
@@ -203,6 +219,7 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
         stats = {
             "missing_tmdb_id": 0,
             "skipped_dedup": 0,
+            "skipped_watched": 0,
             "failed_quality_filter": 0,
             "kept": 0,
         }
@@ -224,6 +241,9 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
                 if not tmdb_id:
                     stats["missing_tmdb_id"] += 1
                     continue
+                if str(tmdb_id) in self.watched_ids.get(item_type, set()):
+                    stats["skipped_watched"] += 1
+                    continue
                 if await self._should_skip_global_request(item_type, tmdb_id):
                     stats["skipped_dedup"] += 1
                     continue
@@ -239,7 +259,7 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
         self.logger.info(
             "Trakt recommendations fetch stats (target=%d, media_type=%s, "
             "type_targets=%s, per_type_limit=%d, ignore_collected=%s, ignore_watched=%s): "
-            "trakt_returned=%s, raw=%d, missing_tmdb=%d, skipped_dedup=%d, "
+            "trakt_returned=%s, raw=%d, missing_tmdb=%d, skipped_dedup=%d, skipped_watched=%d, "
             "failed_quality_filter=%d, kept=%s",
             max_results,
             media_type,
@@ -251,6 +271,7 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
             raw_items_total,
             stats["missing_tmdb_id"],
             stats["skipped_dedup"],
+            stats["skipped_watched"],
             stats["failed_quality_filter"],
             kept_by_type,
         )
