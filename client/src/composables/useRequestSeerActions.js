@@ -42,6 +42,8 @@ export function useRequestSeerActions() {
   let pendingSilentStatuses = {};
   let pendingSilentStatusHandlers = [];
   let posterSilentPrefetchDepth = 0;
+  const recentDeclines = new Map();
+  const RECENT_DECLINE_TTL_MS = 10 * 1000;
 
   function setModalTargetResolver(resolver) {
     modalTargetResolver = typeof resolver === 'function' ? resolver : () => null;
@@ -150,6 +152,17 @@ export function useRequestSeerActions() {
     const key = seerRequestKey(item);
     if (!key) {
       return;
+    }
+
+    const recentDeclineAt = recentDeclines.get(key);
+    if (status?.seer_status === 'pending' && recentDeclineAt) {
+      if (Date.now() - recentDeclineAt < RECENT_DECLINE_TTL_MS) {
+        status = { ...status, seer_status: 'declined', can_action: false };
+      } else {
+        recentDeclines.delete(key);
+      }
+    } else if (status?.seer_status === 'declined') {
+      recentDeclines.delete(key);
     }
 
     const previous = seerStatusByRequest.value[key];
@@ -536,6 +549,7 @@ export function useRequestSeerActions() {
     const previousStatus = getSeerStatus(item) ? { ...getSeerStatus(item) } : null;
 
     invalidateSeerStatusCacheForItem(item.request_id, item.media_type);
+    recentDeclines.set(key, Date.now());
     applySeerStatusFor(item, { seer_status: 'declined', can_action: false });
 
     seerActionLoadingByRequest.value = { ...seerActionLoadingByRequest.value, [key]: true };
@@ -548,6 +562,7 @@ export function useRequestSeerActions() {
         applySeerStatus(response.data, { merge: false });
       }
     } catch (error) {
+      recentDeclines.delete(key);
       applySeerStatusFor(item, previousStatus, { merge: false });
       seerStatusErrorByRequest.value = {
         ...seerStatusErrorByRequest.value,

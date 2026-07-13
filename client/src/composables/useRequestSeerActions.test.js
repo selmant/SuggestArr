@@ -14,3 +14,9 @@ test('hasFreshSeerStatus invalidates cache when stored status disagrees', () => 
   assert.match(seerActionsSource, /stored !== resolved\.seer_status/);
   assert.match(seerActionsSource, /stored === 'pending' && resolved\.seer_status === 'pending' && !resolved\.can_action/);
 });
+
+test('decline protects the optimistic declined state from stale pending refreshes', () => {
+  assert.match(seerActionsSource, /const recentDeclines = new Map\(\)/);
+  assert.match(seerActionsSource, /status\?\.seer_status === 'pending' && recentDeclineAt/);
+  assert.match(seerActionsSource, /recentDeclines\.set\(key, Date\.now\(\)\)/);
+});

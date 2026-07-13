@@ -313,6 +313,30 @@ async def test_decline_request_persists_when_no_pending_requests_remain():
     )
 
 
+@pytest.mark.asyncio
+async def test_decline_request_keeps_declined_state_when_seer_is_eventually_consistent():
+    db = MagicMock()
+    FakeSeerClient.instances = []
+    FakeSeerClient.decline_should_fail = False
+    pending = {("movie", "7"): [{"id": 3, "status": 1, "media_status": 2}]}
+
+    with patch.object(request_actions, "SeerClient", FakeSeerClient), \
+            patch.object(request_actions, "load_env_vars", return_value=_configured_env()), \
+            patch.object(request_actions, "_get_requests_index", AsyncMock(return_value=pending)):
+        result = await request_actions.decline_request(db, "7", "movie")
+
+    assert result["seer_status"] == "declined"
+    db.update_request_seer_state.assert_called_once_with(
+        "7",
+        "movie",
+        seer_request_id=3,
+        seer_request_status=3,
+        seer_media_status=2,
+        seer_status="declined",
+        seer_updated_at=ANY,
+    )
+
+
 def test_derive_seer_status_maps_media_states():
     from api_service.services.seer import seer_status
 

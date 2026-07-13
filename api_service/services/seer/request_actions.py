@@ -278,6 +278,14 @@ async def _apply_action(
         invalidate_requests_index_cache()
         index = await _get_requests_index(client, force=True)
         entries = _lookup_entries(index, media_type, str(tmdb_id))
+        # Seer can briefly return the old pending state immediately after a
+        # successful decline. Treat the accepted action as authoritative so
+        # callers do not resurrect the item while Seer propagates the change.
+        if action == "decline" and any(is_pending_status(entry.get("status")) for entry in entries):
+            entries = [
+                {**entry, "status": 3} if is_pending_status(entry.get("status")) else entry
+                for entry in entries
+            ]
         _persist_seer_state(db, tmdb_id, media_type, entries)
         return _status_payload(tmdb_id, media_type, entries)
 
