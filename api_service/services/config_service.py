@@ -12,6 +12,7 @@ from api_service.config.config import (
 )
 from api_service.config.logger_manager import LoggerManager
 from api_service.db.database_manager import DatabaseManager
+from api_service.db.job_repository import JobRepository
 from api_service.services.config_secrets import (
     EXPORT_SENSITIVE_DATA_WARNING,
     REDACTED,
@@ -241,6 +242,54 @@ def _redact_for_log(config: dict) -> dict:
     return safe
 
 
+def _import_jobs(jobs: list) -> None:
+    """Idempotently create or update jobs supplied by infrastructure-as-code."""
+    if not isinstance(jobs, list):
+        raise ValueError('"jobs" must be a list')
+
+    repository = JobRepository()
+    existing_jobs = repository.get_all_jobs()
+    touched = []
+    for job in jobs:
+        if not isinstance(job, dict):
+            raise ValueError("Each job entry must be an object")
+        required = ("name", "job_type", "media_type", "filters", "schedule_type", "schedule_value")
+        missing = [key for key in required if key not in job]
+        if missing:
+            raise ValueError(f"Job entries require: {', '.join(missing)}")
+        if not isinstance(job["filters"], dict):
+            raise ValueError("Job filters must be an object")
+
+        payload = {
+            key: job[key]
+            for key in (
+                "name", "job_type", "enabled", "media_type", "filters",
+                "schedule_type", "schedule_value", "max_results", "user_ids",
+                "pause_if_pending_requests",
+            )
+            if key in job
+        }
+        match = next(
+            (item for item in existing_jobs
+             if item.get("name") == job["name"] and item.get("job_type") == job["job_type"]),
+            None,
+        )
+        if match:
+            repository.update_job(match["id"], payload)
+            touched.append(match["id"])
+        else:
+            touched.append(repository.create_job(payload))
+
+    # Config import runs after the service scheduler has started. Reconcile it
+    # immediately so newly-created or updated IaC jobs are scheduled now.
+    if touched:
+        from api_service.jobs.job_manager import JobManager
+        manager = JobManager.get_instance()
+        manager.start()
+        manager.sync_jobs_from_db()
+        logger.info("Imported %d infrastructure-managed job(s)", len(touched))
+
+
 class ConfigService:
     """Static service for exporting and importing the full application config.
 
@@ -340,12 +389,15 @@ class ConfigService:
         integrations = data.get("integrations") or {}
         settings = data.get("settings") or {}
         media_users = data.get("media_users") or []
+        jobs = data.get("jobs")
         if not isinstance(integrations, dict):
             raise ValueError('"integrations" must be an object')
         if not isinstance(settings, dict):
             raise ValueError('"settings" must be an object')
         if media_users and not isinstance(media_users, list):
             raise ValueError('"media_users" must be a list')
+        if jobs is not None and not isinstance(jobs, list):
+            raise ValueError('"jobs" must be a list')
 
         db = DatabaseManager()
 
@@ -382,5 +434,9 @@ class ConfigService:
         # --- 3. Restore media users (optional) --------------------------------
         if media_users:
             _import_media_users(db, media_users)
+
+        # --- 4. Restore infrastructure-managed jobs -------------------------
+        if jobs is not None:
+            _import_jobs(jobs)
 
         logger.info("Config import completed successfully")
