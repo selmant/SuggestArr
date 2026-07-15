@@ -10,6 +10,7 @@ from typing import Optional
 from api_service.config.logger_manager import LoggerManager
 from api_service.db.database_manager import DatabaseManager
 from api_service.services.trakt.trakt_client import TraktClient
+from api_service.services.trakt.sync_cache import get_cached_watched_ids
 
 _SKIP_STATUSES = {"revoked", "error"}
 
@@ -124,12 +125,16 @@ class TraktWatchHistorySource:
                 link_id=resolved["id"],
                 token_source=resolved.get("token_source", "manual_oauth"),
             ) as client:
+                # Keep compatibility with lightweight test/plugin clients that
+                # only implement the original init_existing_content API.
+                if hasattr(client, "_request"):
+                    return await get_cached_watched_ids(client, str(media_user_identity_id))
                 await client.init_existing_content()
                 watched = client.existing_content or {}
-            return {
-                "movie": {str(i["tmdb_id"]) for i in watched.get("movie", []) if i.get("tmdb_id")},
-                "tv": {str(i["tmdb_id"]) for i in watched.get("tv", []) if i.get("tmdb_id")},
-            }
+                return {
+                    "movie": {str(i["tmdb_id"]) for i in watched.get("movie", []) if i.get("tmdb_id")},
+                    "tv": {str(i["tmdb_id"]) for i in watched.get("tv", []) if i.get("tmdb_id")},
+                }
         except Exception as exc:
             self.logger.warning("Trakt watched IDs failed for media user %s: %s", media_user_identity_id, exc)
             return {"movie": set(), "tv": set()}

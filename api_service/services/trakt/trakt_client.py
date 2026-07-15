@@ -13,6 +13,7 @@ from api_service.services.http.base_client import BaseHTTPClient
 
 TRAKT_RECOMMENDATIONS_LIMIT_MAX = 250
 TRAKT_RETRY_AFTER_MAX_SECONDS = 5
+TRAKT_RATE_LIMIT_FALLBACK_SECONDS = 1
 
 
 class TraktDeviceFlowError(RuntimeError):
@@ -488,6 +489,7 @@ class TraktClient(BaseHTTPClient):
         limit: int = 20,
         ignore_collected: bool = False,
         ignore_watched: bool = False,
+        watched_ids: Optional[set[str]] = None,
     ) -> list[dict[str, str]]:
         """Fetch personalized Trakt recommendations for the authenticated user.
 
@@ -517,11 +519,14 @@ class TraktClient(BaseHTTPClient):
         payload = await self._request("GET", path, params=params, authenticated=True)
         items = self._normalize_recommendation_items(payload, media_type)
         if ignore_watched:
-            watched_ids = await self._get_watched_tmdb_ids(media_type)
+            watched_ids = watched_ids if watched_ids is not None else await self._get_watched_tmdb_ids(media_type)
             items = [item for item in items if item["tmdb_id"] not in watched_ids]
         return items
 
     async def _get_watched_tmdb_ids(self, media_type: str) -> set[str]:
+        cached = getattr(self, "_cached_watched_ids", None)
+        if cached is not None:
+            return set(cached.get(media_type, set()))
         item_key = "movie" if media_type == "movie" else "show"
         path = "/sync/watched/movies" if media_type == "movie" else "/sync/watched/shows"
         payload = await self._request("GET", path, authenticated=True)
@@ -582,13 +587,14 @@ class TraktClient(BaseHTTPClient):
 
                 if response.status == 429 and retry_rate_limit:
                     retry_after = self._parse_retry_after(response.headers.get("Retry-After"))
-                    if retry_after > 0:
-                        max_retry_after = self._max_retry_after_seconds()
-                        if retry_after > max_retry_after:
-                            raise RuntimeError(
-                                f"Trakt API rate limited {method} {url}; retry after {retry_after}s"
-                            )
-                        await asyncio.sleep(retry_after)
+                    max_retry_after = self._max_retry_after_seconds()
+                    if retry_after > max_retry_after:
+                        raise RuntimeError(
+                            f"Trakt API rate limited {method} {url}; retry after {retry_after}s"
+                        )
+                    # Some Trakt/Cloudflare 429 responses omit Retry-After.
+                    # Do not immediately replay those requests.
+                    await asyncio.sleep(retry_after or TRAKT_RATE_LIMIT_FALLBACK_SECONDS)
                     return await self._request(
                         method,
                         path,

@@ -7,11 +7,10 @@
 ![Build Status](https://img.shields.io/github/actions/workflow/status/giuseppe99barchetta/suggestarr/docker_hub_build.yml?branch=main&label=Build&logo=github)
 ![Platform Support](https://img.shields.io/badge/platforms-linux%2Famd64%20|%20linux%2Farm64-blue?logo=linux)
 ![Docker Pulls](https://img.shields.io/docker/pulls/ciuse99/suggestarr?label=Docker%20Pulls&logo=docker)
-[![Buy Me a Coffee](https://img.shields.io/badge/Donate-Buy%20Me%20a%20Coffee-orange?logo=buy-me-a-coffee)](https://buymeacoffee.com/suggestarr)
 [![](https://dcbadge.limes.pink/api/server/https://discord.com/invite/JXwFd3PnXY?style=flat)](https://discord.com/invite/JXwFd3PnXY)
 </div>
 
-SuggestArr is a project designed to automate media content recommendations and download requests based on user activity in media servers like **Jellyfin**, **Plex**, and now **Emby**. It retrieves recently watched content, searches for similar titles using the TMDb API, and sends automated download requests to **Seer**.
+SuggestArr is an independently maintained fork of [the original SuggestArr project](https://github.com/giuseppe99barchetta/SuggestArr), designed to automate media content recommendations and download requests based on user activity in media servers like **Jellyfin**, **Plex**, and now **Emby**. It is not affiliated with or endorsed by the original maintainer. It retrieves recently watched content, searches for similar titles using the TMDb API, and sends automated download requests to **Seer**.
 
 ## Features
 - **Multi-Media Server Support**: Supports Jellyfin, Plex, and Emby for retrieving media content.

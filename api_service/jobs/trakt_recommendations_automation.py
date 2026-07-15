@@ -14,6 +14,7 @@ from api_service.services.config_service import ConfigService
 from api_service.services.request_sources import TRAKT_RECOMMENDATIONS_SOURCE
 from api_service.services.trakt.media_user_augmentor import TraktAccountResolver
 from api_service.services.trakt.trakt_client import TraktClient, TRAKT_RECOMMENDATIONS_LIMIT_MAX
+from api_service.services.trakt.sync_cache import get_cached_watched_ids
 
 
 class TraktRecommendationsAutomation(TraktJobAutomationBase):
@@ -73,6 +74,7 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
         provider = str(self.env_vars.get("SELECTED_SERVICE") or "").lower()
         external_user_id = str(user_ids[0])
         identity = self.db_manager.get_media_user_identity(provider, external_user_id)
+        self.media_user_identity_id = identity["id"]
         resolved = TraktAccountResolver(self.db_manager).resolve(identity["id"])
         if not resolved:
             raise ValueError(
@@ -93,12 +95,11 @@ class TraktRecommendationsAutomation(TraktJobAutomationBase):
 
     async def _load_watched_ids(self) -> None:
         """Load watched TMDB IDs locally as a fallback to Trakt filtering."""
-        await self.trakt_client.init_existing_content()
-        existing = self.trakt_client.existing_content or {}
-        self.watched_ids = {
-            "movie": {str(item["tmdb_id"]) for item in existing.get("movie", []) if item.get("tmdb_id")},
-            "tv": {str(item["tmdb_id"]) for item in existing.get("tv", []) if item.get("tmdb_id")},
-        }
+        self.watched_ids = await get_cached_watched_ids(
+            self.trakt_client,
+            str(self.media_user_identity_id),
+        )
+        self.trakt_client._cached_watched_ids = self.watched_ids
         self.logger.info(
             "Trakt recommendation watched exclusion loaded: movies=%d, tv=%d",
             len(self.watched_ids["movie"]), len(self.watched_ids["tv"]),

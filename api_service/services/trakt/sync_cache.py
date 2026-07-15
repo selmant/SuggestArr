@@ -133,3 +133,23 @@ async def get_cached_item_statuses(
             "rating_stars": (float(status["rating"]) / 2) if status.get("rating") is not None else None,
         })
     return results
+
+
+async def get_cached_watched_ids(
+    client: TraktClient,
+    user_id: str,
+) -> dict[str, set[str]]:
+    """Return watched TMDb IDs using the shared per-user sync snapshot."""
+    snapshot = await warm_user_sync_cache(client, user_id)
+    return {
+        "movie": {
+            str(item.get("movie", {}).get("ids", {}).get("tmdb"))
+            for item in snapshot.watched_movies
+            if item.get("movie", {}).get("ids", {}).get("tmdb") is not None
+        },
+        "tv": {
+            str(item.get("show", {}).get("ids", {}).get("tmdb"))
+            for item in snapshot.watched_shows
+            if item.get("show", {}).get("ids", {}).get("tmdb") is not None
+        },
+    }
